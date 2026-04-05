@@ -31,7 +31,7 @@ JWT_EXPIRY_HOURS: int = 72
 
 # --- Budget limits (hard caps) ---
 MAX_STEPS: int = 40
-MAX_SECONDS: int = 180
+MAX_SECONDS: int = 300
 MAX_COST_USD: float = 0.08
 
 # --- Agent tuning ---
@@ -65,17 +65,7 @@ MODEL_CHAIN: list[dict] = []
 def _build_model_chain() -> list[dict]:
     """Build the ordered fallback chain from available keys."""
     chain: list[dict] = []
-    if GROQ_API_KEY:
-        chain.append(
-            {
-                "name": "groq",
-                "base_url": "https://api.groq.com/openai/v1",
-                "api_key": GROQ_API_KEY,
-                "model": "llama-3.3-70b-versatile",
-                "cost_input": 0.00059,
-                "cost_output": 0.00079,
-            }
-        )
+    # Gemini first — better at structured JSON output and multi-step reasoning
     if GOOGLE_API_KEY:
         chain.append(
             {
@@ -85,6 +75,17 @@ def _build_model_chain() -> list[dict]:
                 "model": "gemini-2.5-flash",
                 "cost_input": 0.0001,
                 "cost_output": 0.0004,
+            }
+        )
+    if GROQ_API_KEY:
+        chain.append(
+            {
+                "name": "groq",
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": GROQ_API_KEY,
+                "model": "llama-3.3-70b-versatile",
+                "cost_input": 0.00059,
+                "cost_output": 0.00079,
             }
         )
     if DEEPSEEK_API_KEY:

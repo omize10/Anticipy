@@ -39,7 +39,7 @@ SendFn = Callable[[dict], Awaitable[None]]
 MAX_SILENT_RETRIES = 3
 
 # Status streaming interval in seconds (V59)
-STATUS_INTERVAL = 4.0
+STATUS_INTERVAL = 2.0
 
 
 async def _send_status(send: SendFn, message: str) -> None:
@@ -383,7 +383,7 @@ class AgentLoop:
                     "navigate": msg.TASK_NAVIGATING,
                 }
                 status_msg = status_map.get(act_type, msg.TASK_PERFORMING_ACTION)
-                await self._stream_status_if_due(status_msg)
+                await _send_status(self.send, status_msg)  # Always send action status
 
                 success = await self._execute_with_retries(action, elements)
                 self.action_history.append(act_desc)

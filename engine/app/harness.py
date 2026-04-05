@@ -101,16 +101,31 @@ def extract_interactive_elements(tree: dict | None) -> list[dict]:
     # Track seen names to deduplicate
     seen_names = set()
 
+    seen_button_count = {}  # track how many same-named buttons we keep
+
     for elem in all_elements:
         name_lower = elem["name"].lower()
         if name_lower in skip_names or len(elem["name"]) < 2:
             continue
-        # Deduplicate by name
-        if name_lower in seen_names:
-            continue
-        seen_names.add(name_lower)
 
         role = elem["role"]
+
+        # Deduplicate links by name (nav links are truly duplicate)
+        # But allow up to 3 same-named buttons (e.g., multiple "Add to cart")
+        if role in ("link",):
+            if name_lower in seen_names:
+                continue
+            seen_names.add(name_lower)
+        elif role == "button":
+            count = seen_button_count.get(name_lower, 0)
+            if count >= 3:
+                continue
+            seen_button_count[name_lower] = count + 1
+        else:
+            if name_lower in seen_names:
+                continue
+            seen_names.add(name_lower)
+
         if role in form_roles:
             forms.append(elem)
         elif role == "button":

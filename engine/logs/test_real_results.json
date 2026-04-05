@@ -1,0 +1,107 @@
+{
+  "total": 10,
+  "passed": 7,
+  "failed": 3,
+  "results": [
+    {
+      "test": 1,
+      "label": "OpenTable availability search",
+      "passed": false,
+      "elapsed": 185.12402033805847,
+      "actions": 1,
+      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
+      "message_count": 4,
+      "leak": null
+    },
+    {
+      "test": 2,
+      "label": "Books to Scrape \u2014 cheapest travel book",
+      "passed": false,
+      "elapsed": 160.21965837478638,
+      "actions": 37,
+      "response": "Something interrupted that task. Your progress has been saved.",
+      "message_count": 91,
+      "leak": null
+    },
+    {
+      "test": 3,
+      "label": "DemoQA practice form",
+      "passed": true,
+      "elapsed": 47.92604875564575,
+      "actions": 9,
+      "response": "All done! I completed 8 steps to get that done.",
+      "message_count": 25,
+      "leak": null
+    },
+    {
+      "test": 4,
+      "label": "The Internet \u2014 login and logout",
+      "passed": true,
+      "elapsed": 27.718900203704834,
+      "actions": 5,
+      "response": "You logged into a secure area! Welcome to the Secure Area. When you are done click logout below.",
+      "message_count": 13,
+      "leak": null
+    },
+    {
+      "test": 5,
+      "label": "SauceDemo \u2014 add items and checkout",
+      "passed": true,
+      "elapsed": 190.22282528877258,
+      "actions": 26,
+      "response": "Something interrupted that task. Your progress has been saved.",
+      "message_count": 105,
+      "leak": null
+    },
+    {
+      "test": 6,
+      "label": "DemoQA Select Menu \u2014 interact with dropdowns",
+      "passed": true,
+      "elapsed": 23.874902963638306,
+      "actions": 4,
+      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
+      "message_count": 13,
+      "leak": null
+    },
+    {
+      "test": 7,
+      "label": "DemoQA Sortable \u2014 drag item",
+      "passed": true,
+      "elapsed": 20.379973649978638,
+      "actions": 2,
+      "response": "I am on the demoqa.com/sortable page. I see the sortable list items (One, Two, Three, etc.) in the page text. However, the provided",
+      "message_count": 7,
+      "leak": null
+    },
+    {
+      "test": 8,
+      "label": "Google search \u2014 multi-page navigation",
+      "passed": true,
+      "elapsed": 70.63324856758118,
+      "actions": 1,
+      "response": "I wasn't able to complete that. Here's what happened: verification failed",
+      "message_count": 22,
+      "leak": null
+    },
+    {
+      "test": 9,
+      "label": "GitHub trending \u2014 navigate into repo",
+      "passed": true,
+      "elapsed": 190.22967553138733,
+      "actions": 2,
+      "response": "Something interrupted that task. Your progress has been saved.",
+      "message_count": 5,
+      "leak": null
+    },
+    {
+      "test": 10,
+      "label": "Amazon.ca \u2014 search and filter",
+      "passed": false,
+      "elapsed": 15.53714394569397,
+      "actions": 1,
+      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
+      "message_count": 6,
+      "leak": null
+    }
+  ]
+}
