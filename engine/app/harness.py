@@ -88,23 +88,47 @@ def extract_interactive_elements(tree: dict | None) -> list[dict]:
 
     walk(tree)
 
-    # Partition into content vs nav elements
-    content = []
-    nav = []
+    # Prioritize elements by likely importance
+    # Forms/inputs first, then buttons, then content links, then nav links
+    forms = []      # textbox, combobox, searchbox, checkbox, radio, select
+    buttons = []    # button, submit
+    content_links = []  # links with longer/unique names (likely content)
+    nav_links = []  # short generic links (likely navigation)
+
+    form_roles = {"textbox", "searchbox", "combobox", "listbox", "checkbox",
+                  "radio", "spinbutton", "slider", "switch", "option"}
+
+    # Track seen names to deduplicate
+    seen_names = set()
+
     for elem in all_elements:
         name_lower = elem["name"].lower()
         if name_lower in skip_names or len(elem["name"]) < 2:
-            nav.append(elem)
+            continue
+        # Deduplicate by name
+        if name_lower in seen_names:
+            continue
+        seen_names.add(name_lower)
+
+        role = elem["role"]
+        if role in form_roles:
+            forms.append(elem)
+        elif role == "button":
+            buttons.append(elem)
+        elif role == "link":
+            # Heuristic: content links tend to be longer or contain numbers/special chars
+            # Nav links tend to be short single words (category names)
+            if len(elem["name"]) > 25 or any(c in elem["name"] for c in "0123456789£$€@#"):
+                content_links.append(elem)
+            else:
+                nav_links.append(elem)
         else:
-            content.append(elem)
+            content_links.append(elem)
 
-    # Combine content + nav, limit to max
-    combined = (content + nav)[:MAX_LABELED_ELEMENTS]
+    # Assemble: forms first, then buttons, then content links, then nav links
+    combined = (forms + buttons + content_links + nav_links)[:MAX_LABELED_ELEMENTS]
 
-    # Randomize order to prevent position bias (V43)
-    random.shuffle(combined)
-
-    # Assign labels after shuffling
+    # Assign stable labels (no shuffle — model needs consistent labels across steps)
     results: list[dict] = []
     for elem in combined:
         elem["label"] = LABELS[len(results)]
@@ -193,17 +217,23 @@ def format_prompt(
     elements_text = format_elements(elements)
     memory_text = compress_memory(memory) if memory else "none"
 
-    # Include page text excerpt for context — skip obvious nav boilerplate
+    # Include page text excerpt — prioritize content with prices/data
     text_snippet = ""
     if page_text:
-        # Try to skip navigation text at the top and get to content
+        # Find the most useful section: look for prices, numbers, data
         content = page_text
-        for marker in ["Welcome to", "From today", "Featured", "Main content", "Article", "Home"]:
+        # Try to find where the main content starts (after nav)
+        best_start = 0
+        for marker in ["£", "$", "€", "price", "Price", "stock", "rating", "star",
+                        "results", "Results", "showing", "items", "products"]:
             idx = content.find(marker)
             if idx > 50:
-                content = content[idx:]
+                # Go back a bit to capture context
+                best_start = max(0, idx - 200)
                 break
-        text_snippet = f"\nPAGE TEXT (excerpt): {content[:600]}\n"
+        if best_start > 0:
+            content = content[best_start:]
+        text_snippet = f"\nPAGE TEXT (excerpt): {content[:1200]}\n"
 
     # Sub-goal tracking (V37)
     sub_goal_text = ""

@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import random
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -45,21 +46,21 @@ def _decrypt(token: str) -> str:
 
 async def humanize(page: Page, action_type: str = "click") -> None:
     """Add human-like delays and occasional mouse jitter before actions."""
-    await asyncio.sleep(random.uniform(0.4, 1.8))
-    if random.random() < 0.25:
-        x = random.randint(50, 900)
-        y = random.randint(50, 600)
-        await page.mouse.move(x, y, steps=random.randint(5, 15))
-        await asyncio.sleep(random.uniform(0.1, 0.3))
+    await asyncio.sleep(random.uniform(0.15, 0.6))
+    if random.random() < 0.15:
+        x = random.randint(100, 800)
+        y = random.randint(100, 500)
+        await page.mouse.move(x, y, steps=random.randint(3, 8))
+        await asyncio.sleep(random.uniform(0.05, 0.15))
 
 
 async def human_type(page: Page, locator, text: str) -> None:
-    """Type text with per-character delays to mimic a human."""
+    """Type text with realistic but efficient input."""
     await locator.click(timeout=BROWSER_ACTION_TIMEOUT)
+    await asyncio.sleep(random.uniform(0.1, 0.2))
+    # Use fill for speed and reliability, with a slight pause
+    await locator.fill(str(text), timeout=BROWSER_ACTION_TIMEOUT)
     await asyncio.sleep(random.uniform(0.1, 0.3))
-    for char in text:
-        await locator.press_sequentially(char, delay=random.randint(40, 160))
-    await asyncio.sleep(random.uniform(0.1, 0.4))
 
 
 async def human_scroll(page: Page, direction: str = "down") -> None:
@@ -190,10 +191,9 @@ class BrowserManager:
                 ),
             )
         except Exception:
-            # Fallback: try chromium channel if chrome not available
+            # Fallback: launch without channel specification
             self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=profile_dir,
-                channel="chromium",
                 headless=False,
                 no_viewport=True,
                 args=launch_args,
@@ -257,7 +257,7 @@ class BrowserManager:
                 pass
 
         await wait_for_cloudflare(self._page)
-        await wait_for_url_stable(self._page, checks=3, interval=0.5)
+        await self.wait_for_interactive_content(min_elements=2, max_wait=3.0)
 
     async def get_accessibility_tree(self) -> dict | None:
         """Get merged accessibility tree from all frames."""
@@ -433,11 +433,30 @@ class BrowserManager:
         return self._page.get_by_text(name, exact=False)
 
     async def _wait_stable(self) -> None:
-        """Brief wait for page to settle after an action."""
+        """Wait for page to settle after an action."""
         try:
             await self._page.wait_for_load_state("domcontentloaded", timeout=3000)
         except Exception:
             pass
+        # Brief extra wait for JS-rendered content
+        await asyncio.sleep(0.5)
+
+    async def wait_for_interactive_content(self, min_elements: int = 3, max_wait: float = 5.0) -> None:
+        """Wait until the page has enough interactive elements loaded."""
+        if not self._page:
+            return
+        start = time.time()
+        while time.time() - start < max_wait:
+            try:
+                tree = await self._page.accessibility.snapshot()
+                if tree:
+                    from app.harness import extract_interactive_elements
+                    elements = extract_interactive_elements(tree)
+                    if len(elements) >= min_elements:
+                        return
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
 
     async def take_screenshot(self) -> bytes | None:
         """Take a screenshot of the current page. Returns PNG bytes."""
@@ -454,7 +473,7 @@ class BrowserManager:
             return ""
         try:
             text = await self._page.inner_text("body", timeout=3000)
-            return text[:2000]
+            return text[:4000]
         except Exception:
             return ""
 

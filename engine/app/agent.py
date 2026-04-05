@@ -234,11 +234,16 @@ class AgentLoop:
                     continue
 
                 # --- Login detection ---
-                if _detect_login_page(elements, current_url):
+                # Only prompt user for login if the GOAL doesn't contain login credentials
+                # If the user gave us a username/password in the task, we should fill it in ourselves
+                goal_lower = self.goal.lower()
+                has_credentials_in_goal = any(kw in goal_lower for kw in (
+                    "username", "password", "log in with", "login with",
+                    "sign in with", "credentials", "user ", "pass ",
+                ))
+                if _detect_login_page(elements, current_url) and not has_credentials_in_goal:
                     await _send_login(self.send)
-                    # Wait for user to log in and signal continuation
                     user_resp = await self.receive_confirmation()
-                    # Save cookies after login
                     if self.user_id:
                         await self.browser.save_cookies(self.user_id, _get_domain(current_url))
                     continue
@@ -435,7 +440,9 @@ class AgentLoop:
 
         except asyncio.CancelledError:
             await _send_error(self.send, msg.TASK_INTERRUPTED)
-        except Exception:
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
             await _send_error(self.send, msg.CONNECTION_ERROR)
         finally:
             await self.browser.close()

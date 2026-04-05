@@ -37,7 +37,7 @@ MAX_COST_USD: float = 0.08
 # --- Agent tuning ---
 VERIFY_EVERY_N_STEPS: int = 7
 LOOP_DETECTION_THRESHOLD: int = 3
-MAX_LABELED_ELEMENTS: int = 15
+MAX_LABELED_ELEMENTS: int = 20
 MEMORY_MAX_CHARS: int = 300
 
 # --- Security ---
