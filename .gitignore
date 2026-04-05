@@ -27,6 +27,20 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env
+
+# claude/mcp config (contains tokens)
+.mcp.json
+.claude/
+.agents/
+.playwright-mcp/
+skills-lock.json
+
+# python
+__pycache__/
+*.pyc
+engine/logs/test_results.json
+engine/browser-data/
 
 # vercel
 .vercel

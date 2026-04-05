@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@playwright/test": "^1.59.1",
     "@studio-freight/lenis": "^1.0.42",
     "@supabase/supabase-js": "^2.100.1",
     "gsap": "^3.14.2",

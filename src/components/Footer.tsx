@@ -33,6 +33,12 @@ export function Footer() {
             >
               Refund Policy
             </Link>
+            <Link
+              href="/engine"
+              className="text-[13px] text-[var(--text-on-dark-muted)] hover:text-gold transition-colors opacity-50"
+            >
+              Engine
+            </Link>
           </nav>
           <p className="text-[13px] text-[var(--text-on-dark-muted)]">
             omar@anticipy.ai

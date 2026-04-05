@@ -1,0 +1,111 @@
+"""
+Username/password authentication with bcrypt hashing and JWT tokens.
+User records stored in Supabase engine_users table.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from typing import Optional
+
+import bcrypt
+import jwt
+
+from app.config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_HOURS
+from app import supabase_client
+
+
+def _hash_password(password: str) -> str:
+    """Hash a password with bcrypt."""
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    """Verify a password against its bcrypt hash."""
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+
+def _create_token(user_id: str, username: str) -> str:
+    """Create a signed JWT with expiry."""
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "exp": int(time.time()) + JWT_EXPIRY_HOURS * 3600,
+        "iat": int(time.time()),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_token(token: str) -> dict | None:
+    """
+    Validate a JWT and return the payload dict with user_id and username.
+    Returns None if invalid or expired.
+    """
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return {
+            "user_id": payload["user_id"],
+            "username": payload["username"],
+        }
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+
+
+async def signup(username: str, password: str) -> dict:
+    """
+    Create a new user account.
+    Returns {"success": True, "token": ..., "user_id": ...} or
+            {"success": False, "error": "exists"|"failed"}.
+    """
+    # Check if user already exists
+    existing = await supabase_client.select_rows(
+        "engine_users",
+        filters={"username": username},
+        limit=1,
+    )
+    if existing:
+        return {"success": False, "error": "exists"}
+
+    user_id = str(uuid.uuid4())
+    hashed = _hash_password(password)
+
+    row = await supabase_client.insert_row(
+        "engine_users",
+        {
+            "id": user_id,
+            "username": username,
+            "password_hash": hashed,
+        },
+    )
+    if row is None:
+        return {"success": False, "error": "failed"}
+
+    token = _create_token(user_id, username)
+    return {"success": True, "token": token, "user_id": user_id}
+
+
+async def login(username: str, password: str) -> dict:
+    """
+    Authenticate an existing user.
+    Returns {"success": True, "token": ..., "user_id": ...} or
+            {"success": False, "error": "invalid"}.
+    """
+    rows = await supabase_client.select_rows(
+        "engine_users",
+        filters={"username": username},
+        limit=1,
+    )
+    if not rows:
+        return {"success": False, "error": "invalid"}
+
+    user = rows[0]
+    stored_hash = user.get("password_hash", "")
+
+    if not _verify_password(password, stored_hash):
+        return {"success": False, "error": "invalid"}
+
+    user_id = user.get("id", "")
+    token = _create_token(user_id, username)
+    return {"success": True, "token": token, "user_id": user_id}
