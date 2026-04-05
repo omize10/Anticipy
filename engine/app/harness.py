@@ -5,6 +5,8 @@ The core IP — makes cheap models work well by constraining the action space.
 
 from __future__ import annotations
 
+import random
+
 from app.config import MAX_LABELED_ELEMENTS, MEMORY_MAX_CHARS
 
 # Labels A through O (15 max)
@@ -27,11 +29,15 @@ RULES:
 - Pick exactly ONE action per response."""
 
 
+# Valid actions for validation
+VALID_ACTIONS = {"click", "type", "select", "scroll", "navigate", "done", "stuck", "need_info"}
+
+
 def extract_interactive_elements(tree: dict | None) -> list[dict]:
     """
     Walk the accessibility tree and extract interactive elements.
     Returns a list of dicts with 'label', 'role', 'name', and 'node' keys.
-    Limited to MAX_LABELED_ELEMENTS.
+    Limited to MAX_LABELED_ELEMENTS. Labels are randomized to prevent position bias (V43).
     """
     if not tree:
         return []
@@ -92,9 +98,15 @@ def extract_interactive_elements(tree: dict | None) -> list[dict]:
         else:
             content.append(elem)
 
-    # Prioritize content elements, fill remaining slots with nav
+    # Combine content + nav, limit to max
+    combined = (content + nav)[:MAX_LABELED_ELEMENTS]
+
+    # Randomize order to prevent position bias (V43)
+    random.shuffle(combined)
+
+    # Assign labels after shuffling
     results: list[dict] = []
-    for elem in (content + nav)[:MAX_LABELED_ELEMENTS]:
+    for elem in combined:
         elem["label"] = LABELS[len(results)]
         results.append(elem)
 
@@ -112,7 +124,7 @@ def format_elements(elements: list[dict]) -> str:
 def compress_memory(memory: list[str]) -> str:
     """
     Keep a compressed memory of actions taken.
-    Prunes oldest entries to stay under MEMORY_MAX_CHARS.
+    Prunes oldest entries to stay under MEMORY_MAX_CHARS (V36).
     """
     combined = " | ".join(memory)
     if len(combined) <= MEMORY_MAX_CHARS:
@@ -128,6 +140,40 @@ def compress_memory(memory: list[str]) -> str:
     return " | ".join(trimmed)
 
 
+def validate_action(action: dict, elements: list[dict]) -> dict | None:
+    """
+    Validate that a model-produced action is well-formed and targets exist (V41).
+    Returns the action if valid, None if invalid.
+    """
+    if not isinstance(action, dict):
+        return None
+
+    act = action.get("action", "")
+    if act not in VALID_ACTIONS:
+        return None
+
+    target = action.get("target")
+
+    # Actions that require a target label
+    if act in ("click", "type", "select"):
+        if not target:
+            return None
+        # Validate target exists in elements
+        valid_labels = {e.get("label") for e in elements}
+        if target not in valid_labels:
+            return None
+
+    # Type and select require a value
+    if act in ("type", "select") and action.get("value") is None:
+        return None
+
+    # Navigate requires a value (URL)
+    if act == "navigate" and not action.get("value"):
+        return None
+
+    return action
+
+
 def format_prompt(
     goal: str,
     url: str,
@@ -136,10 +182,13 @@ def format_prompt(
     step: int,
     max_steps: int,
     page_text: str = "",
+    sub_goals: list[str] | None = None,
+    current_sub_goal_idx: int = 0,
 ) -> list[dict]:
     """
     Build the complete message list for the LLM.
     Kept under ~800 tokens by aggressive compression.
+    Includes original goal unchanged (V35) and current sub-goal tracking (V37).
     """
     elements_text = format_elements(elements)
     memory_text = compress_memory(memory) if memory else "none"
@@ -156,10 +205,17 @@ def format_prompt(
                 break
         text_snippet = f"\nPAGE TEXT (excerpt): {content[:600]}\n"
 
-    user_msg = f"""GOAL: {goal[:120]}
+    # Sub-goal tracking (V37)
+    sub_goal_text = ""
+    if sub_goals and len(sub_goals) > 0:
+        idx = min(current_sub_goal_idx, len(sub_goals) - 1)
+        sub_goal_text = f"\nCURRENT STEP: {sub_goals[idx]} (step {idx + 1} of {len(sub_goals)})\n"
+
+    # Include original goal unchanged (V35) — never truncate or modify
+    user_msg = f"""GOAL: {goal}
 URL: {url[:120]}
 STEP: {step}/{max_steps}
-HISTORY: {memory_text}{text_snippet}
+HISTORY: {memory_text}{sub_goal_text}{text_snippet}
 ELEMENTS:
 {elements_text}
 

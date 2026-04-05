@@ -21,6 +21,7 @@ TASK_STUCK = "I got stuck and couldn't find a way forward. You may need to try a
 BUDGET_STEPS_EXCEEDED = "I've taken too many steps on this task. Let me know if you'd like me to try a different approach."
 BUDGET_TIME_EXCEEDED = "This is taking longer than expected. Let me know if you'd like me to try again."
 BUDGET_COST_EXCEEDED = "I've reached the limit for this task. Please try again or simplify the request."
+BUDGET_DAILY_EXCEEDED = "You've used up your daily allowance. Try again tomorrow."
 
 # --- Confirmation ---
 CONFIRM_ACTION = "I'm about to {action}. Should I go ahead? (yes/no)"
@@ -51,6 +52,7 @@ AUTH_INVALID_CREDENTIALS = "The username or password is incorrect."
 AUTH_USER_EXISTS = "An account with that username already exists."
 AUTH_TOKEN_INVALID = "Your session has expired. Please log in again."
 AUTH_MISSING_FIELDS = "Please provide both a username and password."
+AUTH_RATE_LIMITED = "Too many failed attempts. Please try again in a little while."
 
 # --- Connection ---
 CONNECTION_ERROR = "Something went wrong on my end. Please try again in a moment."
@@ -63,3 +65,12 @@ TRYING_ALTERNATIVE = "That approach didn't work. Trying something different..."
 
 # --- Loop detection ---
 LOOP_DETECTED = "I seem to be repeating myself. Let me try a different approach."
+
+# --- Task interruption ---
+TASK_INTERRUPTED = "Something interrupted that task. Your progress has been saved."
+
+# --- Input validation ---
+INPUT_TOO_LONG = "That's a bit too detailed for me. Could you simplify what you need?"
+
+# --- Rate limiting ---
+RATE_LIMIT_TASKS = "You've sent too many requests recently. Please wait a moment before trying again."

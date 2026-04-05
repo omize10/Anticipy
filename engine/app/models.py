@@ -1,5 +1,5 @@
 """
-LLM API wrapper with automatic retry, fallback chain, JSON extraction,
+LLM API wrapper with automatic retry, fallback chain, 5-strategy JSON extraction,
 and cumulative cost tracking. Uses raw httpx — no SDK imports.
 """
 
@@ -32,7 +32,7 @@ class CostTracker:
 
 
 def _strip_json(text: str) -> str:
-    """Extract the first JSON object from potentially wrapped text."""
+    """Strategy 1: Extract the first JSON object from potentially wrapped text."""
     # Strip markdown code fences
     text = re.sub(r"```(?:json)?\s*", "", text)
     text = re.sub(r"```\s*$", "", text)
@@ -58,6 +58,77 @@ def _strip_json(text: str) -> str:
     return text
 
 
+def _fix_json_string(text: str) -> str:
+    """Strategy 2: Fix common JSON issues (single quotes, trailing commas, unquoted keys)."""
+    # Replace single quotes with double quotes (naive but handles most cases)
+    fixed = text.replace("'", '"')
+    # Remove trailing commas before closing braces
+    fixed = re.sub(r",\s*}", "}", fixed)
+    fixed = re.sub(r",\s*]", "]", fixed)
+    return fixed
+
+
+def _extract_key_value_pairs(text: str) -> dict | None:
+    """Strategy 3: Extract key-value pairs using regex when JSON parsing fails."""
+    # Look for action, target, value patterns
+    action_match = re.search(r'"?action"?\s*[=:]\s*"?(\w+)"?', text, re.IGNORECASE)
+    target_match = re.search(r'"?target"?\s*[=:]\s*"?([A-O]|null)"?', text, re.IGNORECASE)
+    value_match = re.search(r'"?value"?\s*[=:]\s*"([^"]*)"', text, re.IGNORECASE)
+
+    if action_match:
+        result = {"action": action_match.group(1).lower()}
+        if target_match:
+            t = target_match.group(1)
+            result["target"] = None if t.lower() == "null" else t.upper()
+        else:
+            result["target"] = None
+        if value_match:
+            result["value"] = value_match.group(1)
+        else:
+            result["value"] = None
+        return result
+    return None
+
+
+def _keyword_extraction(text: str) -> dict | None:
+    """Strategy 4: Last-resort keyword extraction from freeform text."""
+    text_lower = text.lower().strip()
+
+    # Check for done/stuck/need_info first
+    if any(kw in text_lower for kw in ["done", "complete", "finished", "task completed"]):
+        # Try to extract an answer value
+        for pattern in [r'answer[:\s]+"([^"]+)"', r"answer[:\s]+(.+?)(?:\.|$)"]:
+            m = re.search(pattern, text_lower)
+            if m:
+                return {"action": "done", "target": None, "value": m.group(1).strip()}
+        return {"action": "done", "target": None, "value": None}
+
+    if "stuck" in text_lower:
+        return {"action": "stuck", "target": None, "value": None}
+
+    if any(kw in text_lower for kw in ["need info", "need more info", "need information"]):
+        return {"action": "need_info", "target": None, "value": text[:100]}
+
+    # Check for click/type actions with letter labels
+    click_match = re.search(r"click\s+(?:on\s+)?(?:\[)?([A-O])(?:\])?", text, re.IGNORECASE)
+    if click_match:
+        return {"action": "click", "target": click_match.group(1).upper(), "value": None}
+
+    type_match = re.search(r"type\s+['\"]?(.+?)['\"]?\s+(?:in(?:to)?)\s+(?:\[)?([A-O])(?:\])?", text, re.IGNORECASE)
+    if type_match:
+        return {"action": "type", "target": type_match.group(2).upper(), "value": type_match.group(1)}
+
+    scroll_match = re.search(r"scroll\s+(up|down)", text, re.IGNORECASE)
+    if scroll_match:
+        return {"action": "scroll", "target": None, "value": scroll_match.group(1).lower()}
+
+    navigate_match = re.search(r"navigate\s+(?:to\s+)?(https?://\S+)", text, re.IGNORECASE)
+    if navigate_match:
+        return {"action": "navigate", "target": None, "value": navigate_match.group(1)}
+
+    return None
+
+
 def _validate_json(text: str) -> dict | None:
     """Try to parse as JSON dict. Return None on failure."""
     try:
@@ -66,6 +137,41 @@ def _validate_json(text: str) -> dict | None:
             return obj
     except (json.JSONDecodeError, ValueError):
         pass
+    return None
+
+
+def _parse_json_5_strategies(text: str) -> dict | None:
+    """
+    5-strategy JSON parsing (V42):
+    1. Direct extraction and parse
+    2. Fix common JSON syntax issues
+    3. Regex key-value extraction
+    4. Keyword extraction from freeform text
+    5. Give up (return None)
+    """
+    # Strategy 1: Standard extraction
+    cleaned = _strip_json(text)
+    result = _validate_json(cleaned)
+    if result:
+        return result
+
+    # Strategy 2: Fix common issues
+    fixed = _fix_json_string(cleaned)
+    result = _validate_json(fixed)
+    if result:
+        return result
+
+    # Strategy 3: Regex extraction of key-value pairs
+    result = _extract_key_value_pairs(text)
+    if result:
+        return result
+
+    # Strategy 4: Keyword extraction
+    result = _keyword_extraction(text)
+    if result:
+        return result
+
+    # Strategy 5: Give up
     return None
 
 
@@ -183,7 +289,7 @@ async def llm_call(
 ) -> str | dict | None:
     """
     Call LLMs with retry and fallback.
-    If require_json=True, strips fences and validates JSON, returning a dict.
+    If require_json=True, uses 5-strategy JSON parsing, returning a dict.
     Otherwise returns raw text.
     Returns None only if every model in the chain fails.
     """
@@ -204,8 +310,7 @@ async def llm_call(
                 )
 
                 if require_json:
-                    cleaned = _strip_json(text)
-                    parsed = _validate_json(cleaned)
+                    parsed = _parse_json_5_strategies(text)
                     if parsed is not None:
                         return parsed
                     # JSON parse failed — retry

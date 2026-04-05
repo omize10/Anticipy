@@ -5,6 +5,8 @@ All budget limits and model fallback order defined here.
 
 import os
 
+from cryptography.fernet import Fernet
+
 
 # --- Supabase ---
 SUPABASE_URL: str = os.environ.get(
@@ -37,6 +39,23 @@ VERIFY_EVERY_N_STEPS: int = 7
 LOOP_DETECTION_THRESHOLD: int = 3
 MAX_LABELED_ELEMENTS: int = 15
 MEMORY_MAX_CHARS: int = 300
+
+# --- Security ---
+PROFILE_ENCRYPTION_KEY: str = os.environ.get(
+    "PROFILE_ENCRYPTION_KEY", Fernet.generate_key().decode()
+)
+MAX_INPUT_LENGTH: int = 2000
+MAX_TASKS_PER_HOUR: int = 20
+MAX_TASKS_PER_DAY: int = 100
+MAX_COST_PER_DAY_USD: float = 0.50
+LOGIN_MAX_FAILURES: int = 5
+LOGIN_BLOCK_MINUTES: int = 30
+
+# --- Browser ---
+BROWSER_PROFILE_BASE: str = "/tmp/engine_profiles"
+BROWSER_ACTION_TIMEOUT: int = 10000
+BROWSER_NAV_TIMEOUT: int = 15000
+MAX_BROWSER_TASKS: int = 50  # restart browser after this many tasks
 
 # --- Model fallback chain ---
 # Each entry: (name, base_url, api_key_value, model_id, cost_per_1k_input, cost_per_1k_output)
@@ -83,3 +102,9 @@ def _build_model_chain() -> list[dict]:
 
 
 MODEL_CHAIN = _build_model_chain()
+
+# --- Required env vars for production ---
+REQUIRED_ENV_VARS: list[str] = [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+]

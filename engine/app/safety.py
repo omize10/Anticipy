@@ -1,5 +1,5 @@
 """
-Deterministic safety rules. The LLM cannot override these.
+Deterministic safety rules and input sanitization. The LLM cannot override these.
 """
 
 from __future__ import annotations
@@ -71,6 +71,32 @@ AUTO_DISMISS_PATTERNS: list[str] = [
     "cookie",
     "consent",
 ]
+
+# Prompt injection patterns to strip from user input (V19)
+INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?previous\s+instructions",
+    r"system\s*:",
+    r"assistant\s*:",
+    r"<\|.*?\|>",
+    r"you\s+are\s+now",
+    r"forget\s+everything",
+    r"new\s+instructions?\s*:",
+    r"disregard\s+(all\s+)?(above|previous)",
+    r"override\s+(all\s+)?instructions",
+    r"pretend\s+you\s+are",
+    r"act\s+as\s+if",
+    r"\[INST\]",
+    r"\[/INST\]",
+    r"<<SYS>>",
+    r"<</SYS>>",
+]
+
+
+def sanitize_input(text: str) -> str:
+    """Strip prompt injection patterns from user input."""
+    for pattern in INJECTION_PATTERNS:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    return text.strip()
 
 
 def _normalize(text: str) -> str:
