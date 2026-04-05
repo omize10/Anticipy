@@ -314,7 +314,7 @@ class AgentLoop:
                     current_sub_goal_idx=self._current_sub_goal_idx,
                 )
                 action = await llm_call_json(
-                    prompt_messages, self.tracker, temperature=0.0, max_tokens=200
+                    prompt_messages, self.tracker, temperature=0.0, max_tokens=500
                 )
 
                 if not action or "action" not in action:

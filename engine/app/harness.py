@@ -96,7 +96,9 @@ def extract_interactive_elements(tree: dict | None) -> list[dict]:
     nav_links = []  # short generic links (likely navigation)
 
     form_roles = {"textbox", "searchbox", "combobox", "listbox", "checkbox",
-                  "radio", "spinbutton", "slider", "switch", "option"}
+                  "radio", "spinbutton", "slider", "switch"}
+    # option elements are low priority — they're dropdown choices, not primary inputs
+    option_role = {"option"}
 
     # Track seen names to deduplicate
     seen_names = set()
@@ -130,6 +132,8 @@ def extract_interactive_elements(tree: dict | None) -> list[dict]:
             forms.append(elem)
         elif role == "button":
             buttons.append(elem)
+        elif role in option_role:
+            nav_links.append(elem)  # options go to lowest priority
         elif role == "link":
             # Heuristic: content links tend to be longer or contain numbers/special chars
             # Nav links tend to be short single words (category names)
@@ -140,8 +144,16 @@ def extract_interactive_elements(tree: dict | None) -> list[dict]:
         else:
             content_links.append(elem)
 
-    # Assemble: forms first, then buttons, then content links, then nav links
-    combined = (forms + buttons + content_links + nav_links)[:MAX_LABELED_ELEMENTS]
+    # Balanced assembly: ensure each category gets representation
+    # Allocate: forms (all), buttons (up to 3), content links (up to 8), nav links (rest)
+    selected_forms = forms[:MAX_LABELED_ELEMENTS]
+    remaining = MAX_LABELED_ELEMENTS - len(selected_forms)
+    selected_buttons = buttons[:min(3, remaining)]
+    remaining -= len(selected_buttons)
+    selected_content = content_links[:min(8, remaining)]
+    remaining -= len(selected_content)
+    selected_nav = nav_links[:remaining]
+    combined = selected_forms + selected_buttons + selected_content + selected_nav
 
     # Assign stable labels (no shuffle — model needs consistent labels across steps)
     results: list[dict] = []
