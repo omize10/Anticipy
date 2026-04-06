@@ -344,8 +344,8 @@ class AgentLoop:
                 # --- Terminal actions ---
                 if act_type == "done":
                     answer = action.get("value")
-                    if answer and isinstance(answer, str) and len(answer) > 5:
-                        self._done_answer = answer
+                    if answer and isinstance(answer, str) and len(answer.strip()) > 2:
+                        self._done_answer = answer.strip()
                     break
 
                 if act_type == "stuck":
@@ -400,43 +400,44 @@ class AgentLoop:
                 # Small delay for page to settle
                 await asyncio.sleep(0.3)
 
-            # --- Final verification ---
-            await _send_status(self.send, msg.TASK_VERIFYING)
-            current_url = await self.browser.get_url()
-            title = await self.browser.get_title()
-            page_content = await self.browser.get_page_text()
-
-            verification = await verify_goal(
-                self.goal,
-                success_indicator,
-                current_url,
-                title,
-                page_content,
-                self.action_history,
-                self.tracker,
-            )
-
             # Save cookies after task
+            current_url = await self.browser.get_url()
             if self.user_id:
                 domain = _get_domain(current_url)
                 if domain:
                     await self.browser.save_cookies(self.user_id, domain)
 
-            # Completion message always includes plain-English summary (V60)
+            # If model already provided an answer, trust it — skip costly verifier
             if self._done_answer:
                 await _send_complete(self.send, self._done_answer)
-            elif verification.get("done"):
-                summary = _build_summary(self.action_history)
-                await _send_complete(self.send, f"{msg.TASK_COMPLETE} {summary}")
             else:
-                reason = verification.get("reason", "")
-                if reason:
-                    await _send_complete(
-                        self.send,
-                        msg.TASK_FAILED.format(reason=reason[:150]),
-                    )
+                # Only run verifier when we don't have a direct answer
+                await _send_status(self.send, msg.TASK_VERIFYING)
+                title = await self.browser.get_title()
+                page_content = await self.browser.get_page_text()
+
+                verification = await verify_goal(
+                    self.goal,
+                    success_indicator,
+                    current_url,
+                    title,
+                    page_content,
+                    self.action_history,
+                    self.tracker,
+                )
+
+                if verification.get("done"):
+                    summary = _build_summary(self.action_history)
+                    await _send_complete(self.send, f"{msg.TASK_COMPLETE} {summary}")
                 else:
-                    await _send_complete(self.send, msg.TASK_STUCK)
+                    reason = verification.get("reason", "")
+                    if reason:
+                        await _send_complete(
+                            self.send,
+                            msg.TASK_FAILED.format(reason=reason[:150]),
+                        )
+                    else:
+                        await _send_complete(self.send, msg.TASK_STUCK)
 
         except asyncio.CancelledError:
             await _send_error(self.send, msg.TASK_INTERRUPTED)
