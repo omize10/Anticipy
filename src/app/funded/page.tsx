@@ -379,9 +379,10 @@ function TimelineSection() {
   const milestones = [
     { label: "Software MVP", status: "done" },
     { label: "Action Engine Prototype", status: "done" },
-    { label: "Hardware Prototype", sub: "Q2 2026", status: "upcoming" },
-    { label: "Beta Launch", sub: "Q4 2026", status: "upcoming" },
-    { label: "Consumer Launch", sub: "2027", status: "upcoming" },
+    { label: "Hardware Prototype", sub: "Q3 2026", status: "upcoming" },
+    { label: "Beta Launch", sub: "Q2 2027", status: "upcoming" },
+    { label: "Consumer Launch", sub: "Q3 2027", status: "upcoming" },
+    { label: "Series A", sub: "$150M+ Valuation", status: "upcoming" },
   ];
 
   return (
@@ -410,7 +411,7 @@ function TimelineSection() {
             {milestones.map((m, i) => (
               <motion.div
                 key={m.label}
-                className="flex flex-col items-center text-center w-[18%]"
+                className="flex flex-col items-center text-center w-[15%]"
                 initial={{ opacity: 0, y: 20 }}
                 animate={inView ? { opacity: 1, y: 0 } : {}}
                 transition={{ duration: 0.6, delay: i * 0.2, ease }}
@@ -736,7 +737,7 @@ function FAQSection() {
   const faqs = [
     {
       q: "What stage is the company?",
-      a: "Pre-seed. Software MVP complete. Action engine prototype functional. Hardware prototype targeting Q2 2026.",
+      a: "Pre-seed. Software MVP complete. Action engine prototype functional. Hardware prototype targeting Q3 2026. Beta launch Q2 2027.",
     },
     {
       q: "What's the use of funds?",
