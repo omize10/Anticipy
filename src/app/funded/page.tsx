@@ -103,9 +103,16 @@ function HeroSection() {
 
         <motion.p
           variants={child}
-          className="text-[clamp(18px,2.5vw,24px)] text-[var(--text-on-dark-muted)] font-light max-w-[640px] mx-auto mb-10"
+          className="text-[clamp(18px,2.5vw,24px)] text-[var(--text-on-dark-muted)] font-light max-w-[640px] mx-auto mb-4"
         >
           The AI wearable that acts — not advises.
+        </motion.p>
+
+        <motion.p
+          variants={child}
+          className="text-[clamp(14px,1.8vw,16px)] text-[var(--text-on-dark-muted)] font-light max-w-[540px] mx-auto mb-10 opacity-70"
+        >
+          Apple is entering this market in 2027. This is your window to invest before the category exists.
         </motion.p>
 
         <motion.div variants={child} className="flex flex-wrap justify-center gap-4 mb-10">
@@ -354,6 +361,19 @@ function WhyNowSection() {
           </ScrollReveal>
         </div>
 
+        <ScrollReveal delay={0.35}>
+          <div
+            className="max-w-[680px] mx-auto mt-14 py-8 px-8 rounded-card text-center"
+            style={{ backgroundColor: "var(--dark-elevated)", border: "1px solid var(--dark-border)" }}
+          >
+            <p className="font-serif text-[clamp(18px,2.5vw,22px)] text-[var(--text-on-dark)] leading-[1.6]">
+              Every generation has a moment where the future is obvious in hindsight.
+              Apple at $15M was a garage. Tesla at $15M was a prototype.
+              The best time to invest is before the world catches on.
+            </p>
+          </div>
+        </ScrollReveal>
+
         <ScrollReveal delay={0.4}>
           <div className="mt-16 max-w-[800px] mx-auto rounded-image overflow-hidden relative">
             <Image
@@ -521,7 +541,7 @@ function ProgressBar() {
         />
       </div>
       <p className="text-[13px] text-[var(--text-on-dark-muted)] mt-3">
-        Limited allocation remaining.
+        Limited allocation remaining. Early investors at this cap stand to benefit most from the Series A repricing.
       </p>
     </div>
   );
@@ -622,8 +642,11 @@ function BookCallSection() {
         </ScrollReveal>
 
         <ScrollReveal delay={0.1}>
-          <p className="text-[18px] text-[var(--text-on-dark-muted)] mb-10">
+          <p className="text-[18px] text-[var(--text-on-dark-muted)] mb-3">
             30 minutes. No pitch. Just conversation.
+          </p>
+          <p className="text-[14px] text-[var(--text-on-dark-muted)] opacity-60 mb-10">
+            The round is filling. The earlier you move, the more favorable your position.
           </p>
         </ScrollReveal>
 
