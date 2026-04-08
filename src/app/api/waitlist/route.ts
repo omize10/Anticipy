@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       }
       console.error("Waitlist insert error:", JSON.stringify(error));
       return NextResponse.json(
-        { error: "Something went wrong.", debug: error.message || error.code || "unknown" },
+        { error: "Something went wrong." },
         { status: 500 }
       );
     }

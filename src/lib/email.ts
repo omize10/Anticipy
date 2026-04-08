@@ -40,6 +40,8 @@ export async function sendInvestorWelcome(email: string, name?: string | null) {
     <li>This is pre-seed — the earliest possible stage to get in</li>
   </ul>
 
+  <p style="font-size: 16px;">Here's the full deck if you want to dig deeper: <a href="https://anticipy.ai/anticipy-deck.pdf" style="color: #C9A227;">Download Pitch Deck</a></p>
+
   <p style="font-size: 16px;">I'd love to walk you through the full picture on a call. No pitch deck presentation — just a real conversation about where this is going and why now is the moment.</p>
 
   <p style="text-align: center; margin: 32px 0;">

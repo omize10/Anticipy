@@ -21,7 +21,7 @@ const FUNDING_CONFIG = {
 
 const CAL_LINK = "https://cal.com/omar-anticipy"; // Profile page — investors pick 15/30/60 min
 const CAL_LINK_30 = "https://cal.com/omar-anticipy/anticipyfundraising30"; // Direct 30-min for emails
-const DECK_URL = ""; // Add Docsend or Pitch.com link when ready
+const DECK_URL = "/anticipy-deck.pdf";
 const CONTACT_EMAIL = "omar@anticipy.ai";
 
 // ─── HELPERS ───────────────────────────────────────────────────
@@ -675,7 +675,7 @@ function InvestorInterestSection() {
         setStatus("duplicate");
       } else {
         const data = await res.json();
-        setErrorMsg(data.debug ? `${data.error} (${data.debug})` : data.error || "Something went wrong.");
+        setErrorMsg(data.error || "Something went wrong.");
         setStatus("error");
       }
     } catch {
