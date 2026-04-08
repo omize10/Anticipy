@@ -1,45 +1,149 @@
 """
 Core execution loop for the Anticipy Action Engine.
+Uses Browser Use framework for browser automation.
 Receives a goal, drives the browser step-by-step, and streams status via callback.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 import time
 from typing import Callable, Awaitable
 from urllib.parse import urlparse
 
-from app.config import MAX_STEPS, MAX_SECONDS, VERIFY_EVERY_N_STEPS, LOOP_DETECTION_THRESHOLD
-from app.models import CostTracker, llm_call_json
-from app.browser import BrowserManager
-from app.harness import (
-    extract_interactive_elements,
-    format_prompt,
-    describe_action,
-    validate_action,
-)
-from app.safety import (
-    check_blocked,
-    check_needs_confirmation,
-    check_page_for_auto_dismiss,
-    sanitize_input,
-)
-from app.planner import plan_task
-from app.verifier import verify_goal, mid_task_check
-from app.captcha import detect_captcha_in_tree, attempt_solve
-from app.vision import get_page_description
-from app import messages as msg
+from browser_use import Agent, BrowserSession, BrowserProfile, AgentHistoryList
 
+from app.config import (
+    MAX_STEPS,
+    MAX_SECONDS,
+    PROFILE_ENCRYPTION_KEY,
+    BROWSER_PROFILE_BASE,
+)
+from app.safety import check_blocked, check_needs_confirmation, sanitize_input
+from app.planner import plan_task
+from app.models import CostTracker
+from app import messages as msg
+from app import supabase_client
+
+from cryptography.fernet import Fernet
+
+logger = logging.getLogger("engine")
 
 # Callback type: async function that sends a message dict to the client
 SendFn = Callable[[dict], Awaitable[None]]
 
-# Maximum silent retries before reporting error to user (V58)
-MAX_SILENT_RETRIES = 3
+# Fernet cipher for cookie encryption
+_fernet = Fernet(
+    PROFILE_ENCRYPTION_KEY.encode()
+    if isinstance(PROFILE_ENCRYPTION_KEY, str)
+    else PROFILE_ENCRYPTION_KEY
+)
 
-# Status streaming interval in seconds (V59)
-STATUS_INTERVAL = 2.0
+# --- Status message mapping ---
+# Maps Browser Use action types to user-friendly messages
+_ACTION_STATUS_MAP = {
+    "go_to_url": msg.TASK_NAVIGATING,
+    "navigate": msg.TASK_NAVIGATING,
+    "search": msg.TASK_NAVIGATING,
+    "click": msg.TASK_PERFORMING_ACTION,
+    "input": msg.TASK_TYPING,
+    "input_text": msg.TASK_TYPING,
+    "type": msg.TASK_TYPING,
+    "scroll": msg.TASK_SCROLLING,
+    "scroll_down": msg.TASK_SCROLLING,
+    "scroll_up": msg.TASK_SCROLLING,
+    "select": msg.TASK_SELECTING,
+    "select_option": msg.TASK_SELECTING,
+    "wait": msg.TASK_WAITING,
+    "extract_page_content": msg.TASK_READING_PAGE,
+    "done": msg.TASK_COMPLETE,
+}
+
+
+def _get_llm():
+    """Return the best available LLM using browser-use's native wrappers."""
+    from browser_use import ChatGoogle, ChatGroq
+
+    google_key = os.environ.get("GOOGLE_API_KEY")
+    if google_key:
+        return ChatGoogle(
+            model="gemini-2.5-flash",
+            api_key=google_key,
+            temperature=0.0,
+            thinking_budget=0,
+        )
+
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        return ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            api_key=groq_key,
+            temperature=0.0,
+        )
+
+    raise RuntimeError("No LLM API key found. Set GOOGLE_API_KEY or GROQ_API_KEY.")
+
+
+def _get_domain(url: str) -> str:
+    try:
+        return urlparse(url).netloc
+    except Exception:
+        return ""
+
+
+async def _load_cookies(user_id: str, domain: str) -> list[dict] | None:
+    """Load saved cookies from Supabase, decrypt."""
+    try:
+        rows = await supabase_client.select_rows(
+            "browser_profiles",
+            filters={"user_id": user_id, "site_domain": domain},
+            limit=1,
+        )
+        if rows:
+            encrypted = rows[0].get("cookies_json", "")
+            if not encrypted:
+                return None
+            try:
+                cookies_json = _fernet.decrypt(encrypted.encode("utf-8")).decode("utf-8")
+            except Exception:
+                cookies_json = encrypted
+            cookies = json.loads(cookies_json)
+            if cookies:
+                return cookies
+    except Exception:
+        pass
+    return None
+
+
+async def _save_cookies(user_id: str, domain: str, cookies: list[dict]) -> None:
+    """Encrypt and save cookies to Supabase."""
+    try:
+        # Sanitize cookies — never store passwords or sensitive form data
+        safe_cookies = []
+        for c in cookies:
+            cookie = dict(c)
+            # Strip any cookie that looks like it contains credentials
+            name_lower = cookie.get("name", "").lower()
+            if any(kw in name_lower for kw in ("password", "passwd", "secret", "credit", "card")):
+                continue
+            safe_cookies.append(cookie)
+
+        cookies_json = json.dumps(safe_cookies)
+        encrypted = _fernet.encrypt(cookies_json.encode("utf-8")).decode("utf-8")
+        await supabase_client.upsert_row(
+            "browser_profiles",
+            {
+                "user_id": user_id,
+                "site_domain": domain,
+                "cookies_json": encrypted,
+                "updated_at": "now()",
+            },
+        )
+    except Exception:
+        pass
 
 
 async def _send_status(send: SendFn, message: str) -> None:
@@ -62,48 +166,9 @@ async def _send_error(send: SendFn, message: str) -> None:
     await send({"type": "error", "message": message})
 
 
-def _detect_login_page(elements: list[dict], url: str) -> bool:
-    """Heuristic: detect if current page is a login form."""
-    has_password = False
-    has_username = False
-
-    for elem in elements:
-        name_lower = (elem.get("name") or "").lower()
-        role = (elem.get("role") or "").lower()
-
-        if role == "textbox" and any(kw in name_lower for kw in ("password",)):
-            has_password = True
-        if role == "textbox" and any(
-            kw in name_lower for kw in ("email", "username", "user", "login")
-        ):
-            has_username = True
-
-    url_lower = url.lower()
-    url_has_login = any(kw in url_lower for kw in ("login", "signin", "sign-in", "log-in", "auth"))
-
-    return (has_password and has_username) or (has_password and url_has_login)
-
-
-def _get_domain(url: str) -> str:
-    try:
-        return urlparse(url).netloc
-    except Exception:
-        return ""
-
-
-def _is_duplicate_irreversible(action_desc: str, history: list[str]) -> bool:
-    """Check if an irreversible action was already performed (V39)."""
-    irreversible_keywords = ("purchase", "buy", "order", "submit", "send", "pay", "delete", "cancel")
-    desc_lower = action_desc.lower()
-    if not any(kw in desc_lower for kw in irreversible_keywords):
-        return False
-    # Check if same action already in history
-    return action_desc in history
-
-
-class AgentLoop:
+class EngineAgent:
     """
-    The main agent loop. Drives a browser to accomplish a goal.
+    Wraps Browser Use Agent with Anticipy's safety, streaming, and cookie management.
     """
 
     def __init__(
@@ -117,40 +182,71 @@ class AgentLoop:
         self.send = send
         self.receive_confirmation = receive_confirmation
         self.user_id = user_id
-
         self.tracker = CostTracker()
-        self.browser = BrowserManager()
-        self.memory: list[str] = []
-        self.action_history: list[str] = []
-        self.step = 0
-        self.start_time = 0.0
-        self._done_answer: str | None = None
+        self._session: BrowserSession | None = None
         self._last_status_time: float = 0.0
-        self._previous_url: str = ""
-        self._sub_goals: list[str] = []
-        self._current_sub_goal_idx: int = 0
+        self._step_count: int = 0
+        self._start_time: float = 0.0
+        self._stopped: bool = False
 
-    async def _stream_status_if_due(self, message: str) -> None:
-        """Stream status to user at throttled interval (V59)."""
+    async def _on_step(self, browser_state, agent_output, step_num) -> None:
+        """Callback fired after each Browser Use step. Streams status to user."""
+        self._step_count = step_num
         now = time.time()
-        if now - self._last_status_time >= STATUS_INTERVAL:
-            await _send_status(self.send, message)
-            self._last_status_time = now
 
-    async def _execute_with_retries(self, action: dict, elements: list[dict]) -> bool:
-        """Execute action with silent retries (V58)."""
-        for attempt in range(MAX_SILENT_RETRIES):
-            success = await self.browser.execute_action(action, elements)
-            if success:
-                return True
-            if attempt < MAX_SILENT_RETRIES - 1:
-                await asyncio.sleep(0.5 * (attempt + 1))
+        # Budget check — time
+        elapsed = now - self._start_time
+        if elapsed > MAX_SECONDS:
+            self._stopped = True
+            return
+
+        # Throttle status updates to every 2 seconds
+        if now - self._last_status_time < 2.0:
+            return
+        self._last_status_time = now
+
+        # Determine status message from the agent's actions
+        status_msg = msg.TASK_PERFORMING_ACTION
+        if agent_output and agent_output.action:
+            for action in agent_output.action:
+                try:
+                    # ActionModel is dynamic — dump to dict to inspect
+                    action_dict = action.model_dump(exclude_none=True)
+                    for action_name in action_dict.keys():
+                        action_lower = action_name.lower()
+                        for key, val in _ACTION_STATUS_MAP.items():
+                            if key in action_lower:
+                                status_msg = val
+                                break
+                except Exception:
+                    pass
+
+        # Use next_goal for more descriptive status if available
+        description = status_msg.rstrip(".")
+        if agent_output and agent_output.next_goal:
+            # Use a simplified version of next_goal
+            goal_text = agent_output.next_goal[:60]
+            if len(agent_output.next_goal) > 60:
+                goal_text += "..."
+            description = goal_text
+
+        progress = msg.STEP_PROGRESS.format(current=step_num, description=description)
+        await _send_status(self.send, progress)
+
+    async def _should_stop(self) -> bool:
+        """Check if agent should stop (budget exceeded)."""
+        if self._stopped:
+            return True
+        elapsed = time.time() - self._start_time
+        if elapsed > MAX_SECONDS:
+            self._stopped = True
+            return True
         return False
 
     async def run(self) -> None:
-        """Execute the full agent loop."""
-        self.start_time = time.time()
-        self._last_status_time = self.start_time
+        """Execute the full agent loop using Browser Use."""
+        self._start_time = time.time()
+        self._last_status_time = self._start_time
 
         try:
             # --- Safety check ---
@@ -158,309 +254,254 @@ class AgentLoop:
                 await _send_error(self.send, msg.BLOCKED_ACTION)
                 return
 
-            # --- Plan ---
+            # --- Plan (get starting URL) ---
             await _send_status(self.send, msg.TASK_STARTING)
             plan = await plan_task(self.goal, self.tracker)
             start_url = plan["url"]
-            self._sub_goals = plan["sub_goals"]
-            success_indicator = plan["success"]
 
-            # --- Launch browser ---
-            await self.browser.launch(self.user_id)
-            page = await self.browser.new_context(self.user_id)
+            # --- Configure browser session ---
+            profile_dir = os.path.join(
+                BROWSER_PROFILE_BASE, self.user_id or "_anonymous"
+            )
+            os.makedirs(profile_dir, exist_ok=True)
 
-            # Load saved cookies for domain
+            # Build chrome args for stealth
+            chrome_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--window-size=1920,1080",
+            ]
+
+            # NopeCHA extension for CAPTCHA solving
+            nopecha_dir = os.path.join(os.path.dirname(__file__), "..", "nopecha")
+            if os.path.isdir(nopecha_dir):
+                chrome_args.extend([
+                    f"--disable-extensions-except={nopecha_dir}",
+                    f"--load-extension={nopecha_dir}",
+                ])
+
+            self._session = BrowserSession(
+                headless=False,
+                user_data_dir=profile_dir,
+                args=chrome_args,
+                no_viewport=True,
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                wait_between_actions=0.5,
+                minimum_wait_page_load_time=0.5,
+                wait_for_network_idle_page_load_time=3.0,
+            )
+
+            # --- Load saved cookies ---
             domain = _get_domain(start_url)
+            cookies = None
             if self.user_id and domain:
-                await self.browser.load_cookies(self.user_id, domain)
+                cookies = await _load_cookies(self.user_id, domain)
 
-            # --- Navigate to start ---
+            # Start session and inject cookies before agent runs
+            await self._session.start()
+            if cookies and self._session._browser_context:
+                try:
+                    await self._session._browser_context.add_cookies(cookies)
+                except Exception:
+                    pass
+
+            # --- Get LLM ---
+            llm = _get_llm()
+
+            # --- Build task with starting URL hint ---
+            task = self.goal
+            if start_url and not start_url.startswith("https://www.google.com/search"):
+                task = f"Go to {start_url} and {self.goal}"
+
+            # --- Create Browser Use agent ---
             await _send_status(self.send, msg.TASK_NAVIGATING)
-            self._previous_url = start_url
-            await self.browser.navigate(start_url)
 
-            # --- Main loop ---
-            while self.step < MAX_STEPS:
-                self.step += 1
-                elapsed = time.time() - self.start_time
+            agent = Agent(
+                task=task,
+                llm=llm,
+                browser_session=self._session,
+                max_actions_per_step=3,
+                max_failures=5,
+                use_vision=True,
+                register_new_step_callback=self._on_step,
+                register_should_stop_callback=self._should_stop,
+                generate_gif=False,
+                enable_planning=True,
+                loop_detection_enabled=True,
+            )
 
-                # Budget checks
-                if elapsed > MAX_SECONDS:
-                    await _send_error(self.send, msg.BUDGET_TIME_EXCEEDED)
-                    break
-                if self.tracker.exceeded:
-                    await _send_error(self.send, msg.BUDGET_COST_EXCEEDED)
-                    break
-
-                # Get current state
-                current_url = await self.browser.get_url()
-
-                # Save URL before navigation for rollback (V38)
-                self._previous_url = current_url
-
-                tree = await self.browser.get_accessibility_tree()
-                elements = extract_interactive_elements(tree)
-
-                # --- Canvas-heavy page detection (V29-V30) ---
-                if await self.browser.detect_canvas_heavy():
-                    page_text = await self.browser.get_page_text()
-                    if page_text:
-                        self.memory.append("canvas-heavy page, using text")
-                    # Continue with whatever elements we have, fall back to text
-
-                # --- CAPTCHA detection ---
-                captcha_info = detect_captcha_in_tree(tree)
-                if captcha_info:
-                    await _send_status(self.send, msg.CAPTCHA_DETECTED)
-                    solved = await attempt_solve(page, current_url)
-                    if solved:
-                        await _send_status(self.send, msg.CAPTCHA_SOLVED)
-                        continue
-                    else:
-                        # Ask user to solve manually
-                        await _send_status(self.send, msg.CAPTCHA_MANUAL)
-                        user_resp = await self.receive_confirmation()
-                        continue
-
-                # --- Cookie consent auto-dismiss ---
-                dismiss_elem = check_page_for_auto_dismiss(elements)
-                if dismiss_elem:
-                    await self._execute_with_retries(
-                        {"action": "click", "target": dismiss_elem["label"], "value": None},
-                        elements,
-                    )
-                    self.memory.append("dismissed cookie banner")
-                    await asyncio.sleep(0.5)
-                    continue
-
-                # --- Login detection ---
-                # Only prompt user for login if the GOAL doesn't contain login credentials
-                # If the user gave us a username/password in the task, we should fill it in ourselves
-                goal_lower = self.goal.lower()
-                has_credentials_in_goal = any(kw in goal_lower for kw in (
-                    "username", "password", "log in with", "login with",
-                    "sign in with", "credentials", "user ", "pass ",
-                ))
-                if _detect_login_page(elements, current_url) and not has_credentials_in_goal:
-                    await _send_login(self.send)
-                    user_resp = await self.receive_confirmation()
-                    if self.user_id:
-                        await self.browser.save_cookies(self.user_id, _get_domain(current_url))
-                    continue
-
-                # --- No elements fallback ---
-                if not elements:
-                    page_text = await self.browser.get_page_text()
-                    suggestion = await get_page_description(
-                        page_text, current_url, self.goal, self.tracker
-                    )
-                    if suggestion:
-                        sug_action = suggestion.get("suggestion", "scroll")
-                        if sug_action == "scroll":
-                            await self._execute_with_retries(
-                                {"action": "scroll", "target": None, "value": "down"},
-                                [],
-                            )
-                            self.memory.append("scrolled (no elements)")
-                            continue
-                        elif sug_action == "navigate" and suggestion.get("url"):
-                            await self.browser.navigate(suggestion["url"])
-                            self.memory.append("navigated (fallback)")
-                            continue
-                        elif sug_action == "done":
-                            break
-                    # Default: scroll down
-                    await self._execute_with_retries(
-                        {"action": "scroll", "target": None, "value": "down"},
-                        [],
-                    )
-                    self.memory.append("scrolled (empty page)")
-                    continue
-
-                # --- Mid-task verification ---
-                if self.step > 1 and self.step % VERIFY_EVERY_N_STEPS == 0:
-                    await self._stream_status_if_due(msg.MIDTASK_CHECK)
-                    title = await self.browser.get_title()
-                    check = await mid_task_check(
-                        self.goal, current_url, title, self.action_history, self.tracker
-                    )
-                    if not check.get("on_track", True) and check.get("suggestion"):
-                        self.memory.append(f"course-correct: {check['suggestion'][:50]}")
-
-                # --- Loop detection ---
-                if len(self.action_history) >= LOOP_DETECTION_THRESHOLD:
-                    recent = self.action_history[-LOOP_DETECTION_THRESHOLD:]
-                    if len(set(recent)) == 1:
-                        await _send_status(self.send, msg.LOOP_DETECTED)
-                        self.memory.append("LOOP: tried same action 3x, need different approach")
-
-                # --- Get page text for context ---
-                page_text = await self.browser.get_page_text()
-
-                # --- Ask the LLM for next action ---
-                await self._stream_status_if_due(
-                    msg.STEP_PROGRESS.format(current=self.step, description="deciding next step...")
+            # --- Run with hard timeout ---
+            try:
+                history: AgentHistoryList = await asyncio.wait_for(
+                    agent.run(max_steps=MAX_STEPS),
+                    timeout=MAX_SECONDS + 30,
                 )
+            except asyncio.TimeoutError:
+                await _send_error(self.send, msg.BUDGET_TIME_EXCEEDED)
+                await self._save_session_cookies(start_url)
+                return
 
-                prompt_messages = format_prompt(
-                    self.goal,
-                    current_url,
-                    elements,
-                    self.memory,
-                    self.step,
-                    MAX_STEPS,
-                    page_text=page_text,
-                    sub_goals=self._sub_goals,
-                    current_sub_goal_idx=self._current_sub_goal_idx,
-                )
-                action = await llm_call_json(
-                    prompt_messages, self.tracker, temperature=0.0, max_tokens=500
-                )
+            # --- Process result ---
+            await self._save_session_cookies(start_url)
 
-                if not action or "action" not in action:
-                    # LLM failed to respond — try scrolling
-                    self.memory.append("no response, scrolling")
-                    await self._stream_status_if_due(msg.TASK_SCROLLING)
-                    await self._execute_with_retries(
-                        {"action": "scroll", "target": None, "value": "down"},
-                        [],
-                    )
-                    continue
-
-                # --- Validate action against actual elements (V41) ---
-                validated = validate_action(action, elements)
-                if not validated:
-                    self.memory.append("invalid action, scrolling")
-                    await self._execute_with_retries(
-                        {"action": "scroll", "target": None, "value": "down"},
-                        [],
-                    )
-                    continue
-
-                action = validated
-                act_type = action.get("action", "")
-                act_desc = describe_action(action)
-
-                # --- Terminal actions ---
-                if act_type == "done":
-                    answer = action.get("value")
-                    if answer and isinstance(answer, str) and len(answer.strip()) > 2:
-                        self._done_answer = answer.strip()
-                    break
-
-                if act_type == "stuck":
-                    await _send_error(self.send, msg.TASK_STUCK)
-                    break
-
-                if act_type == "need_info":
-                    info_needed = action.get("value", "more information")
-                    await _send_confirm(self.send, f"I need some information: {info_needed}", "info")
-                    user_resp = await self.receive_confirmation()
-                    self.memory.append(f"user said: {user_resp[:50]}")
-                    self.goal = f"{self.goal} ({user_resp[:100]})"
-                    continue
-
-                # --- Duplicate irreversible action check (V39) ---
-                if _is_duplicate_irreversible(act_desc, self.action_history):
-                    self.memory.append(f"SKIPPED duplicate: {act_desc[:30]}")
-                    continue
-
-                # --- Safety confirmation ---
-                if check_needs_confirmation(act_desc):
-                    confirm_msg = msg.CONFIRM_ACTION.format(action=act_desc)
-                    await _send_confirm(self.send, confirm_msg, act_desc)
-                    user_resp = await self.receive_confirmation()
-                    if user_resp.lower() not in ("yes", "y", "ok", "sure", "go ahead", "confirm"):
-                        self.memory.append(f"user declined: {act_desc[:30]}")
-                        continue
-
-                # --- Execute action ---
-                status_map = {
-                    "click": msg.TASK_PERFORMING_ACTION,
-                    "type": msg.TASK_TYPING,
-                    "select": msg.TASK_SELECTING,
-                    "scroll": msg.TASK_SCROLLING,
-                    "navigate": msg.TASK_NAVIGATING,
-                }
-                status_msg = status_map.get(act_type, msg.TASK_PERFORMING_ACTION)
-                await _send_status(self.send, status_msg)  # Always send action status
-
-                success = await self._execute_with_retries(action, elements)
-                self.action_history.append(act_desc)
-                self.memory.append(act_desc[:40])
-
-                if not success:
-                    self.memory.append(f"FAILED: {act_desc[:30]}")
-
-                # Track sub-goal progress
-                if success and act_type in ("click", "type", "select", "navigate"):
-                    if self._current_sub_goal_idx < len(self._sub_goals) - 1:
-                        self._current_sub_goal_idx += 1
-
-                # Small delay for page to settle
-                await asyncio.sleep(0.3)
-
-            # Save cookies after task
-            current_url = await self.browser.get_url()
-            if self.user_id:
-                domain = _get_domain(current_url)
-                if domain:
-                    await self.browser.save_cookies(self.user_id, domain)
-
-            # If model already provided an answer, trust it — skip costly verifier
-            if self._done_answer:
-                await _send_complete(self.send, self._done_answer)
-            else:
-                # Only run verifier when we don't have a direct answer
-                await _send_status(self.send, msg.TASK_VERIFYING)
-                title = await self.browser.get_title()
-                page_content = await self.browser.get_page_text()
-
-                verification = await verify_goal(
-                    self.goal,
-                    success_indicator,
-                    current_url,
-                    title,
-                    page_content,
-                    self.action_history,
-                    self.tracker,
-                )
-
-                if verification.get("done"):
-                    summary = _build_summary(self.action_history)
-                    await _send_complete(self.send, f"{msg.TASK_COMPLETE} {summary}")
+            if history.is_done():
+                result_text = history.final_result()
+                if result_text and len(result_text.strip()) > 2:
+                    # Clean any technical leakage from the result
+                    clean_result = _sanitize_output(result_text)
+                    await _send_complete(self.send, clean_result)
                 else:
-                    reason = verification.get("reason", "")
-                    if reason:
-                        await _send_complete(
-                            self.send,
-                            msg.TASK_FAILED.format(reason=reason[:150]),
-                        )
-                    else:
-                        await _send_complete(self.send, msg.TASK_STUCK)
+                    await _send_complete(
+                        self.send,
+                        "I completed the task but couldn't get a clear answer. Can you check?"
+                    )
+            elif self._stopped:
+                await _send_error(self.send, msg.BUDGET_TIME_EXCEEDED)
+            else:
+                # Try to extract any partial result
+                result_text = history.final_result()
+                if result_text:
+                    clean_result = _sanitize_output(result_text)
+                    await _send_complete(self.send, clean_result)
+                else:
+                    await _send_complete(self.send, msg.TASK_STUCK)
 
         except asyncio.CancelledError:
             await _send_error(self.send, msg.TASK_INTERRUPTED)
         except Exception as exc:
-            import traceback
-            traceback.print_exc()
+            logger.exception("Agent execution error")
             await _send_error(self.send, msg.CONNECTION_ERROR)
         finally:
-            await self.browser.close()
+            await self._close()
+
+    async def _save_session_cookies(self, start_url: str) -> None:
+        """Save cookies from the current browser session."""
+        if not self.user_id or not self._session:
+            return
+        try:
+            domain = _get_domain(start_url)
+            # Also save cookies for current URL domain
+            current_url = await self._session.get_current_page_url()
+            current_domain = _get_domain(current_url) if current_url else ""
+
+            cookies = await self._session.cookies()
+            if cookies and domain:
+                # Filter cookies for this domain
+                domain_cookies = [
+                    c for c in cookies
+                    if domain in (c.get("domain", "") or "")
+                ]
+                if domain_cookies:
+                    await _save_cookies(self.user_id, domain, domain_cookies)
+
+            if current_domain and current_domain != domain and cookies:
+                current_cookies = [
+                    c for c in cookies
+                    if current_domain in (c.get("domain", "") or "")
+                ]
+                if current_cookies:
+                    await _save_cookies(self.user_id, current_domain, current_cookies)
+        except Exception:
+            pass
+
+    async def _close(self) -> None:
+        """Close browser session."""
+        try:
+            if self._session:
+                await self._session.stop()
+        except Exception:
+            pass
+        self._session = None
 
 
-def _build_summary(history: list[str]) -> str:
-    """Build a plain-English summary from action history (V60)."""
-    if not history:
-        return ""
-    # Keep it brief: summarize the last few meaningful actions
-    meaningful = [h for h in history if not h.startswith("scroll")]
-    if not meaningful:
-        return ""
-    if len(meaningful) <= 3:
-        return "I " + ", then ".join(meaningful[:3]) + "."
-    return f"I completed {len(meaningful)} steps to get that done."
+# --- Technical leakage sanitization ---
 
+_BANNED_PATTERNS = [
+    "json", "api", "error", "model", "token", "null", "undefined",
+    "traceback", "timeout", "500", "429", "dom", "selector",
+    "accessibility", "xpath", "css", "javascript", "python",
+    "function", "debug", "console", "http", "endpoint", "exception",
+]
+
+
+def _sanitize_output(text: str) -> str:
+    """
+    Remove technical terms from agent output that users should never see.
+    Strip markdown code blocks and JSON formatting.
+    """
+    if not text:
+        return text
+
+    import re
+
+    # Strip markdown code blocks (```json ... ```)
+    had_code_blocks = '```' in text
+    text = re.sub(r'```(?:json)?\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+
+    # Convert JSON array/object formatting to plain text
+    # Replace {"name": "X", "price": "Y"} patterns with readable format
+    def _json_to_plain(match):
+        try:
+            import json as _json
+            data = _json.loads(match.group(0))
+            if isinstance(data, list):
+                lines = []
+                for i, item in enumerate(data, 1):
+                    if isinstance(item, dict):
+                        parts = []
+                        for k, v in item.items():
+                            parts.append(str(v))
+                        lines.append(f"{i}. {' — '.join(parts)}")
+                    else:
+                        lines.append(f"{i}. {item}")
+                return '\n'.join(lines)
+            elif isinstance(data, dict):
+                return ', '.join(f"{k}: {v}" for k, v in data.items())
+        except Exception:
+            pass
+        return match.group(0)
+
+    # Only convert JSON if markdown code blocks were present
+    if had_code_blocks:
+        text = re.sub(r'\[\s*\{[^]]+\}\s*\]', _json_to_plain, text, flags=re.DOTALL)
+
+    # Technical terms that should never appear in user-facing output
+    tech_terms_to_strip = [
+        "javascript", "xpath", "css selector", "dom element", "iframe",
+        "accessibility tree", "playwright", "chromium", "webdriver",
+        "api call", "http request", "json response",
+    ]
+
+    text_lower = text.lower()
+
+    # Replace technical terms with user-friendly alternatives
+    for term in tech_terms_to_strip:
+        if term in text_lower:
+            text = re.sub(re.escape(term), "a different method", text, flags=re.IGNORECASE)
+            text_lower = text.lower()
+
+    # These are only problematic when they appear in error-like contexts
+    error_indicators = [
+        "traceback", "exception", "stack trace", "status code",
+        "api error", "http error", "500 internal", "429 too many",
+        "null pointer", "undefined is not",
+    ]
+
+    for indicator in error_indicators:
+        if indicator in text_lower:
+            return "I ran into a problem completing that. Want to try again?"
+
+    return text.strip()
+
+
+# --- Public entry point ---
 
 async def execute_task(
     goal: str,
@@ -469,13 +510,21 @@ async def execute_task(
     user_id: str | None = None,
 ) -> None:
     """
-    Top-level entry point. Creates an AgentLoop and runs it
-    with a hard timeout.
+    Top-level entry point. Creates an EngineAgent and runs it
+    with a hard timeout. Called by main.py WebSocket handler.
     """
-    agent = AgentLoop(goal, send, receive_confirmation, user_id)
+    agent = EngineAgent(goal, send, receive_confirmation, user_id)
     try:
-        await asyncio.wait_for(agent.run(), timeout=MAX_SECONDS + 10)
+        await asyncio.wait_for(agent.run(), timeout=MAX_SECONDS + 60)
     except asyncio.TimeoutError:
         await _send_error(send, msg.BUDGET_TIME_EXCEEDED)
     finally:
-        await agent.browser.close()
+        await agent._close()
+
+
+# PHASE 2: User device fallback
+# If datacenter IP is blocked, offer to run the browser on the user's device instead.
+# Architecture: Browser Use connects to a remote Chrome instance on user's machine
+# via Chrome DevTools Protocol. The user installs a lightweight bridge app that
+# exposes their local Chrome to the cloud agent. This gives residential IP + real
+# browser fingerprint. Implementation deferred to post-raise.

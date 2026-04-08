@@ -145,13 +145,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Anticipy Action Engine", version="1.0.0", lifespan=lifespan)
 
-# --- CORS (V25) ---
-# Keep * for now since we have multiple domains, but configured for easy restriction
+# --- CORS (restricted to known origins) ---
+ALLOWED_ORIGINS = [
+    "https://anticipy-beta.vercel.app",
+    "https://anticipy.ai",
+    "https://www.anticipy.ai",
+    "http://localhost:3000",
+    "http://localhost:8000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 

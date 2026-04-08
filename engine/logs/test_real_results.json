@@ -1,107 +1,74 @@
 {
+  "passed": 7,
   "total": 10,
-  "passed": 6,
-  "failed": 4,
   "results": [
     {
       "test": 1,
-      "label": "OpenTable availability search",
+      "name": "OpenTable",
       "passed": false,
-      "elapsed": 123.04216861724854,
-      "actions": 1,
-      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
-      "message_count": 4,
-      "leak": null
+      "elapsed": 151,
+      "response": ""
     },
     {
       "test": 2,
-      "label": "Books to Scrape \u2014 cheapest travel book",
-      "passed": false,
-      "elapsed": 15.89958143234253,
-      "actions": 3,
-      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
-      "message_count": 10,
-      "leak": null
+      "name": "Amazon",
+      "passed": true,
+      "elapsed": 35,
+      "response": "Here are the name and price of the top 3 non-sponsored USB-C cables from Amazon.ca:\n1. Anker USB C to USB C Cable (6FT, 2Pack), 100W USB C Charger Cord: $17.99\n2. Anker USB C Cable, [2-Pack, 6 ft] Type C Charger Premium Nylon USB Cable: $14.99\n3. INIU USB A to USB C Cable, [3 Pack] QC 3.0 Fast Charg"
     },
     {
       "test": 3,
-      "label": "DemoQA practice form",
+      "name": "Google click",
       "passed": true,
-      "elapsed": 54.006057262420654,
-      "actions": 8,
-      "response": "All done! I completed 7 steps to get that done.",
-      "message_count": 22,
-      "leak": null
+      "elapsed": 111,
+      "response": "I have thoroughly searched Google for 'Anticipy AI wearable' using various search queries and explored multiple search results. I was unable to find any relevant information about a product or official website for 'Anticipy AI wearable'. The search results primarily consisted of general articles abo"
     },
     {
       "test": 4,
-      "label": "The Internet \u2014 login and logout",
+      "name": "SauceDemo",
       "passed": true,
-      "elapsed": 15.352446556091309,
-      "actions": 4,
-      "response": "You have successfully logged into the secure area. The page title is 'Secure Area'. The page says: 'You logged into a secure area! Welcome to the Secure Area. When you are done click logout below.'",
-      "message_count": 10,
-      "leak": null
+      "elapsed": 168,
+      "response": "I have successfully logged in to saucedemo.com, added the first two items (Sauce Labs Backpack and Sauce Labs Bike Light) to the cart, and proceeded through checkout with John Smith 12345. The order has been completed. However, the total amount was not displayed on the final 'Checkout: Complete!' pa"
     },
     {
       "test": 5,
-      "label": "SauceDemo \u2014 add items and checkout",
+      "name": "GitHub",
       "passed": true,
-      "elapsed": 63.8543336391449,
-      "actions": 12,
-      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
-      "message_count": 33,
-      "leak": null
+      "elapsed": 22,
+      "response": "Repository Name: google-ai-edge/gallery\nDescription: Explore, Experience, and Evaluate the Future of On-Device Generative AI with Google AI Edge. AI Edge Gallery is the premier destination for running the world's most powerful open-source Large Language Models (LLMs) on your mobile device. Experienc"
     },
     {
       "test": 6,
-      "label": "DemoQA Select Menu \u2014 interact with dropdowns",
+      "name": "Bot",
       "passed": true,
-      "elapsed": 28.77885365486145,
-      "actions": 5,
-      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
-      "message_count": 16,
-      "leak": null
+      "elapsed": 15,
+      "response": "The following tests failed: WebGL Vendor (Canvas has no webgl context) and WebGL Renderer (Canvas has no webgl context)."
     },
     {
       "test": 7,
-      "label": "DemoQA Sortable \u2014 drag item",
+      "name": "Cloudflare",
       "passed": true,
-      "elapsed": 17.765411376953125,
-      "actions": 2,
-      "response": "I am unable to perform a drag action with the available tools. Therefore, I could not drag the first item to a different position.",
-      "message_count": 6,
-      "leak": null
+      "elapsed": 110,
+      "response": "I was unable to directly access https://nowsecure.nl due to a persistent Cloudflare security challenge. I attempted to resolve this by waiting, clicking the iframe directly, and using JavaScript, but all attempts failed. I then tried searching for \"nowsecure.nl page content\" and \"nowsecure.nl websit"
     },
     {
       "test": 8,
-      "label": "Google search \u2014 multi-page navigation",
-      "passed": true,
-      "elapsed": 190.20901107788086,
-      "actions": 1,
-      "response": "Something interrupted that task. Your progress has been saved.",
-      "message_count": 3,
-      "leak": null
+      "name": "reCAPTCHA",
+      "passed": false,
+      "elapsed": 121,
+      "response": ""
     },
     {
       "test": 9,
-      "label": "GitHub trending \u2014 navigate into repo",
-      "passed": false,
-      "elapsed": 14.755706310272217,
-      "actions": 2,
-      "response": "I wasn't able to complete that. Here's what happened: verification failed",
-      "message_count": 8,
-      "leak": null
+      "name": "Login",
+      "passed": true,
+      "elapsed": 26,
+      "response": "The secure page says: \"Welcome to the Secure Area. When you are done click logout below.\""
     },
     {
       "test": 10,
-      "label": "Amazon.ca \u2014 search and filter",
-      "passed": false,
-      "elapsed": 123.90986585617065,
-      "actions": 5,
-      "response": "I got stuck and couldn't find a way forward. You may need to try a different approach.",
-      "message_count": 15,
-      "leak": null
+      "name": "Leakage",
+      "passed": false
     }
   ]
 }

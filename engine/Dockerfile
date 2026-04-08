@@ -6,8 +6,10 @@ RUN apt-get update && apt-get install -y xvfb && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-# Install patchright browsers
+# Install patchright browsers (used by browser-use)
 RUN python -m patchright install chromium
+# Install playwright browsers (fallback)
+RUN python -m playwright install chromium 2>/dev/null || true
 
 COPY . .
 

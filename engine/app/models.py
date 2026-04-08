@@ -237,6 +237,7 @@ async def _call_gemini(
         "generationConfig": {
             "temperature": temperature,
             "maxOutputTokens": max_tokens,
+            "thinkingConfig": {"thinkingBudget": 0},
         },
     }
 

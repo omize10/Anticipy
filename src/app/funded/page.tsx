@@ -675,7 +675,7 @@ function InvestorInterestSection() {
         setStatus("duplicate");
       } else {
         const data = await res.json();
-        setErrorMsg(data.error || "Something went wrong.");
+        setErrorMsg(data.debug ? `${data.error} (${data.debug})` : data.error || "Something went wrong.");
         setStatus("error");
       }
     } catch {
