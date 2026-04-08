@@ -3,7 +3,7 @@ import sgMail from "@sendgrid/mail";
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const FROM_EMAIL = "hello@anticipy.ai";
 const FROM_NAME = "Omar from Anticipy";
-const CAL_LINK = "https://cal.com/omar/investor-call";
+const CAL_LINK = "https://cal.com/omar-anticipy/anticipyfundraising30";
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);

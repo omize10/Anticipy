@@ -19,7 +19,8 @@ const FUNDING_CONFIG = {
   minInvestment: 1000,
 };
 
-const CAL_LINK = "https://cal.com/omar/investor-call";
+const CAL_LINK = "https://cal.com/omar-anticipy"; // Profile page — investors pick 15/30/60 min
+const CAL_LINK_30 = "https://cal.com/omar-anticipy/anticipyfundraising30"; // Direct 30-min for emails
 const DECK_URL = ""; // Add Docsend or Pitch.com link when ready
 const CONTACT_EMAIL = "omar@anticipy.ai";
 
@@ -621,7 +622,7 @@ function BookCallSection() {
         <ScrollReveal delay={0.2}>
           <div className="max-w-[700px] mx-auto rounded-card overflow-hidden" style={{ backgroundColor: "var(--dark-elevated)" }}>
             <iframe
-              src={`${CAL_LINK}?embed=true&theme=dark`}
+              src={`${CAL_LINK}?embed=true&layout=month_view&theme=dark`}
               width="100%"
               height="700"
               frameBorder="0"
