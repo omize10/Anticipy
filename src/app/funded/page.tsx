@@ -351,7 +351,7 @@ function WhyNowSection() {
 
           <ScrollReveal delay={0.3}>
             <p className="text-[16px] leading-[1.75] text-[var(--text-on-dark-muted)]">
-              At a $149 consumer price point, Anticipy is not a niche gadget for early adopters. It is a mass-market
+              At a $199 consumer price point, Anticipy is not a niche gadget for early adopters. It is a mass-market
               product priced for mainstream adoption from day one — the same strategy that made AirPods a $30 billion
               category.
             </p>
@@ -398,11 +398,11 @@ function TimelineSection() {
 
   const milestones = [
     { label: "Software MVP", status: "done" },
-    { label: "Action Engine Prototype", status: "done" },
-    { label: "Hardware Prototype", sub: "Q3 2026", status: "upcoming" },
-    { label: "Beta Launch", sub: "Q2 2027", status: "upcoming" },
-    { label: "Consumer Launch", sub: "Q3 2027", status: "upcoming" },
-    { label: "Series A", sub: "$150M+ Valuation", status: "upcoming" },
+    { label: "Action Engine", status: "done" },
+    { label: "Working Prototype", sub: "Sep 2026", status: "upcoming" },
+    { label: "Limited Launch", sub: "Nov 2026", status: "upcoming" },
+    { label: "Scale Production", sub: "Q1 2027", status: "upcoming" },
+    { label: "Seed Raise $3-5M", sub: "Q2 2027", status: "upcoming" },
   ];
 
   return (
@@ -522,7 +522,7 @@ function TermsSection() {
     { label: "Valuation Cap", value: formatCurrency(FUNDING_CONFIG.valuationCap) },
     { label: "Instrument", value: FUNDING_CONFIG.instrument },
     { label: "Equity", value: FUNDING_CONFIG.equity },
-    { label: "Use of Funds", value: "Hardware, team, consumer launch" },
+    { label: "Use of Funds", value: "Team, manufacturing, marketing, ops" },
   ];
 
   return (
@@ -572,21 +572,24 @@ function TeamSection() {
         </ScrollReveal>
 
         <ScrollReveal delay={0.1}>
-          <div className="flex flex-col items-center text-center max-w-[480px] mx-auto">
-            {/* Avatar */}
-            <div
-              className="w-[88px] h-[88px] rounded-full flex items-center justify-center mb-6"
-              style={{ backgroundColor: "rgba(201,162,39,0.15)", border: "2px solid rgba(201,162,39,0.3)" }}
-            >
-              <span className="font-serif text-[32px]" style={{ color: "#C9A227" }}>
-                O
-              </span>
+          <div className="flex flex-col items-center text-center max-w-[520px] mx-auto">
+            <div className="w-[120px] h-[120px] rounded-full overflow-hidden mb-6 border-2" style={{ borderColor: "rgba(201,162,39,0.3)" }}>
+              <Image
+                src="/images/omar.jpg"
+                alt="Omar Ebrahim"
+                width={120}
+                height={120}
+                className="w-full h-full object-cover"
+              />
             </div>
-            <h3 className="font-serif text-[24px] text-[var(--text-on-light)]">Omar</h3>
-            <p className="text-[14px] text-[var(--text-on-light-muted)] mt-1 mb-4">Founder & CEO</p>
+            <h3 className="font-serif text-[24px] text-[var(--text-on-light)]">Omar Ebrahim</h3>
+            <p className="text-[14px] text-[var(--text-on-light-muted)] mt-1 mb-4">Founder & CEO &middot; 15 &middot; West Vancouver</p>
             <p className="text-[15px] leading-[1.7] text-[var(--text-on-light-muted)]">
-              Building since age 8. Obsessed with closing the gap between what AI knows and what AI
-              does.
+              Started coding at 8. First production app at 13. At 15, built the AI that turns
+              ambient conversations into completed tasks. Solo. Zero funding. The software runs today.
+            </p>
+            <p className="text-[14px] italic text-[var(--text-on-light-muted)] mt-4 opacity-70">
+              &ldquo;I&apos;m just getting started.&rdquo;
             </p>
           </div>
         </ScrollReveal>
@@ -863,11 +866,11 @@ function FAQSection() {
   const faqs = [
     {
       q: "What stage is the company?",
-      a: "Pre-seed. Software MVP complete. Action engine prototype functional. Hardware prototype targeting Q3 2026. Beta launch Q2 2027.",
+      a: "Pre-seed. Software MVP complete. Action engine prototype functional. Working hardware prototype targeting September 2026. Limited launch November 2026.",
     },
     {
       q: "What's the use of funds?",
-      a: "40% hardware development, 30% team hiring including firmware and full-stack engineers and head of growth, 20% launch marketing, 10% operations.",
+      a: "Team (firmware engineer, software engineer, head of growth) $380K. Manufacturing (10,000 units, charging bases, MIM tooling, Shenzhen sourcing) $450K. Marketing and distribution $150K. Legal, IP, and certifications $80K. Operations and infrastructure $140K. Working capital and contingency $300K.",
     },
     {
       q: "Who else has invested?",
@@ -875,7 +878,7 @@ function FAQSection() {
     },
     {
       q: "What's the competitive moat?",
-      a: "Ambient intent detection architecture. Our system identifies actionable moments from natural conversation without explicit commands — a capability no competitor has demonstrated.",
+      a: "Privacy-first architecture creates a structural moat. Competitors store and transmit audio to the cloud — their architecture cannot support autonomous action without rebuilding from scratch. We have provisional patents covering ambient intent detection and on-device ephemeral audio processing. PCT international filing covering US, Canada, EU, UK, China, GCC, South Africa.",
     },
     {
       q: "How do I invest if I'm not in the US?",
