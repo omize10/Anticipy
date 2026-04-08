@@ -1,12 +1,14 @@
-import sgMail from "@sendgrid/mail";
-
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const FROM_EMAIL = "hello@anticipy.ai";
 const FROM_NAME = "Omar from Anticipy";
 const CAL_LINK = "https://cal.com/omar-anticipy/anticipyfundraising30";
 
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
+async function getSgMail() {
+  const sgMail = (await import("@sendgrid/mail")).default;
+  if (SENDGRID_API_KEY) {
+    sgMail.setApiKey(SENDGRID_API_KEY);
+  }
+  return sgMail;
 }
 
 // ─── INVESTOR SIGNUP (from /funded) ────────────────────────────
@@ -16,6 +18,7 @@ export async function sendInvestorWelcome(email: string, name?: string | null) {
   const firstName = name?.split(" ")[0] || "";
   const greeting = firstName ? `Hey ${firstName}` : "Hey there";
 
+  const sgMail = await getSgMail();
   await sgMail.send({
     to: email,
     from: { email: FROM_EMAIL, name: FROM_NAME },
@@ -66,6 +69,7 @@ export async function sendWaitlistWelcome(email: string, name?: string | null) {
   const firstName = name?.split(" ")[0] || "";
   const greeting = firstName ? `Hey ${firstName}` : "Hey";
 
+  const sgMail = await getSgMail();
   await sgMail.send({
     to: email,
     from: { email: FROM_EMAIL, name: FROM_NAME },
