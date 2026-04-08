@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { sendInvestorWelcome, sendWaitlistWelcome } from "@/lib/email";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const FAKE_EMAILS = ["test@test.com", "a@b.c", "test@example.com"];
@@ -68,6 +69,14 @@ export async function POST(request: NextRequest) {
         { error: "Something went wrong." },
         { status: 500 }
       );
+    }
+
+    // Send welcome email (don't block the response)
+    const trimmedName = name?.trim() || null;
+    if (source === "funded") {
+      sendInvestorWelcome(normalizedEmail, trimmedName).catch(console.error);
+    } else {
+      sendWaitlistWelcome(normalizedEmail, trimmedName).catch(console.error);
     }
 
     return NextResponse.json({ success: true }, { status: 201 });
