@@ -646,9 +646,12 @@ function BookCallSection() {
 
 // ─── EMAIL CAPTURE / INVESTOR INTEREST ─────────────────────────
 function InvestorInterestSection() {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "duplicate">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+
+  const firstName = name.trim().split(" ")[0];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -659,7 +662,7 @@ function InvestorInterestSection() {
       const res = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, source: "funded" }),
+        body: JSON.stringify({ email, name: name.trim(), source: "funded" }),
       });
 
       if (res.status === 201) {
@@ -688,8 +691,8 @@ function InvestorInterestSection() {
 
         <ScrollReveal delay={0.1}>
           <p className="text-[15px] leading-[1.7] text-[var(--text-on-light-muted)] max-w-[520px] mx-auto mb-3">
-            Leave your email and we&apos;ll send you the deck, terms, and next steps.
-            No spam. Just the opportunity.
+            Leave your name and email. We&apos;ll personally send you the deck, terms, and
+            next steps — and a link to book time with Omar directly.
           </p>
           <p className="text-[13px] text-[var(--text-on-light-muted)] opacity-60 mb-8">
             Minimum investment: {formatCurrency(FUNDING_CONFIG.minInvestment)}
@@ -701,35 +704,78 @@ function InvestorInterestSection() {
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="max-w-[440px] mx-auto"
+              className="max-w-[500px] mx-auto text-left"
             >
-              <div className="flex items-center justify-center gap-3 mb-3">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="12" fill="#C9A227" />
-                  <path d="M7 12 L10 15 L17 8" stroke="#0C0C0C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <div className="flex items-center gap-3 mb-6">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                  <circle cx="14" cy="14" r="14" fill="#C9A227" />
+                  <path d="M8 14 L12 18 L20 10" stroke="#0C0C0C" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <p className="text-[16px] font-medium text-[var(--text-on-light)]">
-                  You&apos;re on the list.
+                <p className="font-serif text-[22px] text-[var(--text-on-light)]">
+                  {firstName ? `Welcome, ${firstName}.` : "You\u2019re in."}
                 </p>
               </div>
-              <p className="text-[14px] text-[var(--text-on-light-muted)]">
-                We&apos;ll be in touch within 24 hours with your investor packet.
+
+              <div className="space-y-4 text-[15px] leading-[1.7] text-[var(--text-on-light-muted)]">
+                <p>
+                  {firstName ? `Hey ${firstName}` : "Hey"} — really glad you&apos;re interested.
+                  This isn&apos;t a mass email situation. Omar will personally reach out
+                  within the next 24 hours with your investor packet.
+                </p>
+                <p>
+                  In the meantime, if you&apos;d rather skip the wait and talk now:
+                </p>
+              </div>
+
+              <a
+                href={CAL_LINK}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-6 px-8 py-3.5 rounded-pill text-[15px] font-semibold transition-all duration-200"
+                style={{ backgroundColor: "#C9A227", color: "var(--dark)" }}
+              >
+                Book a Call with Omar
+              </a>
+
+              <p className="text-[13px] text-[var(--text-on-light-muted)] mt-6">
+                Or email directly:{" "}
+                <a href={`mailto:${CONTACT_EMAIL}`} className="text-gold hover:underline">
+                  {CONTACT_EMAIL}
+                </a>
               </p>
             </motion.div>
           ) : status === "duplicate" ? (
-            <p className="text-[15px] text-[var(--text-on-light-muted)]">
-              You&apos;re already on the list. We&apos;ll be in touch soon.
-            </p>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="max-w-[440px] mx-auto"
+            >
+              <p className="text-[15px] text-[var(--text-on-light)] mb-4">
+                You&apos;re already on the list — we haven&apos;t forgotten about you.
+              </p>
+              <p className="text-[14px] text-[var(--text-on-light-muted)] mb-6">
+                If you haven&apos;t heard from us yet, book a call directly:
+              </p>
+              <a
+                href={CAL_LINK}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block px-8 py-3.5 rounded-pill text-[15px] font-semibold transition-all duration-200"
+                style={{ backgroundColor: "#C9A227", color: "var(--dark)" }}
+              >
+                Book a Call with Omar
+              </a>
+            </motion.div>
           ) : (
             <form onSubmit={handleSubmit} className="max-w-[440px] mx-auto">
-              <div className="flex gap-3">
+              <div className="flex flex-col gap-3">
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
                   required
-                  className="flex-1 px-5 py-3.5 rounded-pill text-[15px] outline-none transition-all duration-200"
+                  className="w-full px-5 py-3.5 rounded-pill text-[15px] outline-none transition-all duration-200"
                   style={{
                     backgroundColor: "var(--cream-muted)",
                     color: "var(--text-on-light)",
@@ -738,18 +784,35 @@ function InvestorInterestSection() {
                   onFocus={(e) => (e.currentTarget.style.borderColor = "#C9A227")}
                   onBlur={(e) => (e.currentTarget.style.borderColor = "var(--cream-border)")}
                 />
-                <button
-                  type="submit"
-                  disabled={status === "loading"}
-                  className="px-6 py-3.5 rounded-pill text-[15px] font-semibold transition-all duration-200 flex-shrink-0"
-                  style={{
-                    backgroundColor: "#C9A227",
-                    color: "var(--dark)",
-                    opacity: status === "loading" ? 0.7 : 1,
-                  }}
-                >
-                  {status === "loading" ? "..." : "I\u2019m In"}
-                </button>
+                <div className="flex gap-3">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="your@email.com"
+                    required
+                    className="flex-1 px-5 py-3.5 rounded-pill text-[15px] outline-none transition-all duration-200"
+                    style={{
+                      backgroundColor: "var(--cream-muted)",
+                      color: "var(--text-on-light)",
+                      border: "1px solid var(--cream-border)",
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "#C9A227")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "var(--cream-border)")}
+                  />
+                  <button
+                    type="submit"
+                    disabled={status === "loading"}
+                    className="px-6 py-3.5 rounded-pill text-[15px] font-semibold transition-all duration-200 flex-shrink-0"
+                    style={{
+                      backgroundColor: "#C9A227",
+                      color: "var(--dark)",
+                      opacity: status === "loading" ? 0.7 : 1,
+                    }}
+                  >
+                    {status === "loading" ? "..." : "I\u2019m In"}
+                  </button>
+                </div>
               </div>
               {status === "error" && (
                 <p className="text-[13px] mt-3" style={{ color: "#c44" }}>{errorMsg}</p>

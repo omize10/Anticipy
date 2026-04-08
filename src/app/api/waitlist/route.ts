@@ -6,7 +6,7 @@ const FAKE_EMAILS = ["test@test.com", "a@b.c", "test@example.com"];
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, source } = await request.json();
+    const { email, source, name } = await request.json();
 
     if (!email || !EMAIL_REGEX.test(email)) {
       return NextResponse.json(
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     // Insert
     const { error } = await supabaseAdmin.from("anticipy_waitlist").insert({
       email: normalizedEmail,
+      name: name?.trim() || null,
       source: source === "funded" ? "funded" : "website",
       ip_address: ip,
       user_agent: request.headers.get("user-agent") || null,

@@ -8,6 +8,7 @@ import { ease } from "@/lib/animation";
 type FormState = "idle" | "loading" | "success" | "duplicate" | "error";
 
 export function WaitlistCTA() {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [state, setState] = useState<FormState>("idle");
 
@@ -21,7 +22,7 @@ export function WaitlistCTA() {
       const res = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, name: name.trim() || undefined }),
       });
 
       if (res.ok) {
@@ -94,8 +95,21 @@ export function WaitlistCTA() {
           ) : (
             <form
               onSubmit={handleSubmit}
-              className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto"
+              className="flex flex-col gap-3 max-w-md mx-auto"
             >
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                className="w-full px-6 py-3.5 rounded-pill text-[15px] font-light outline-none transition-colors duration-300"
+                style={{
+                  background: "var(--dark-elevated)",
+                  border: "1px solid var(--dark-border)",
+                  color: "var(--text-on-dark)",
+                }}
+              />
+              <div className="flex flex-col sm:flex-row gap-3">
               <input
                 type="email"
                 value={email}
@@ -124,6 +138,7 @@ export function WaitlistCTA() {
                   "Join Waitlist"
                 )}
               </button>
+              </div>
             </form>
           )}
 
