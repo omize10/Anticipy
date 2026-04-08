@@ -5,23 +5,22 @@ import { useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ease, defaultTransition } from "@/lib/animation";
-import { ScrollReveal, StaggerContainer, staggerChild } from "@/components/ScrollReveal";
+import { ScrollReveal } from "@/components/ScrollReveal";
 
 // ─── CONFIGURATION ─────────────────────────────────────────────
 // Update these values as the raise progresses
 const FUNDING_CONFIG = {
-  raised: 150000,
   goal: 1500000,
   valuationCap: 15000000,
   equity: "~10%",
   instrument: "SAFE (post-money)",
   projectedReturn: "92x",
   projectedYear: 2031,
+  minInvestment: 1000,
 };
 
 const CAL_LINK = "https://cal.com/omar/investor-call";
 const DECK_URL = ""; // Add Docsend or Pitch.com link when ready
-const WEFUNDER_URL = ""; // Add when community round opens
 const CONTACT_EMAIL = "omar@anticipy.ai";
 
 // ─── HELPERS ───────────────────────────────────────────────────
@@ -30,8 +29,6 @@ function formatCurrency(n: number) {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
   return `$${n.toLocaleString()}`;
 }
-
-const pct = Math.min((FUNDING_CONFIG.raised / FUNDING_CONFIG.goal) * 100, 100);
 
 // ─── NAV ───────────────────────────────────────────────────────
 function FundedNav() {
@@ -84,7 +81,7 @@ function HeroSection() {
 
   const deckAction = DECK_URL
     ? { label: "Download Deck", href: DECK_URL, external: true }
-    : { label: "Join Waitlist", href: "/waitlist", external: false };
+    : { label: "Get Early Access", href: "#investor-interest", external: false };
 
   return (
     <section className="section-dark min-h-screen flex items-center justify-center pt-[72px]">
@@ -162,7 +159,7 @@ function HeroSection() {
               {deckAction.label}
             </a>
           ) : (
-            <Link
+            <a
               href={deckAction.href}
               className="px-8 py-3.5 rounded-pill text-[15px] font-medium border transition-all duration-200"
               style={{
@@ -171,7 +168,7 @@ function HeroSection() {
               }}
             >
               {deckAction.label}
-            </Link>
+            </a>
           )}
         </motion.div>
 
@@ -366,10 +363,13 @@ function WhyNowSection() {
             className="max-w-[680px] mx-auto mt-14 py-8 px-8 rounded-card text-center"
             style={{ backgroundColor: "var(--dark-elevated)", border: "1px solid var(--dark-border)" }}
           >
-            <p className="font-serif text-[clamp(18px,2.5vw,22px)] text-[var(--text-on-dark)] leading-[1.6]">
-              Every generation has a moment where the future is obvious in hindsight.
-              Apple at $15M was a garage. Tesla at $15M was a prototype.
-              The best time to invest is before the world catches on.
+            <p className="font-serif text-[clamp(18px,2.5vw,22px)] text-[var(--text-on-dark)] leading-[1.6] mb-4">
+              This is getting into Apple before it was Apple.
+              Bitcoin before it was Bitcoin. The best investments are
+              obvious in hindsight — invisible in the moment.
+            </p>
+            <p className="text-[14px] text-[var(--text-on-dark-muted)] opacity-70">
+              At a $15M cap, you&apos;re investing at the stage where legends are made.
             </p>
           </div>
         </ScrollReveal>
@@ -515,38 +515,7 @@ function TimelineSection() {
   );
 }
 
-// ─── TERMS + PROGRESS BAR ──────────────────────────────────────
-function ProgressBar() {
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, amount: 0.5 });
-
-  return (
-    <div ref={ref} className="mt-12">
-      <div className="flex justify-between items-baseline mb-3">
-        <p className="text-[15px] text-[var(--text-on-dark)]">
-          {formatCurrency(FUNDING_CONFIG.raised)}{" "}
-          <span className="text-[var(--text-on-dark-muted)]">
-            raised of {formatCurrency(FUNDING_CONFIG.goal)}
-          </span>
-        </p>
-        <p className="text-[13px] text-[var(--text-on-dark-muted)]">{Math.round(pct)}%</p>
-      </div>
-      <div className="w-full h-[6px] rounded-full overflow-hidden" style={{ backgroundColor: "var(--dark-border)" }}>
-        <motion.div
-          className="h-full rounded-full"
-          style={{ backgroundColor: "#C9A227" }}
-          initial={{ width: 0 }}
-          animate={inView ? { width: `${pct}%` } : {}}
-          transition={{ duration: 1.5, ease }}
-        />
-      </div>
-      <p className="text-[13px] text-[var(--text-on-dark-muted)] mt-3">
-        Limited allocation remaining. Early investors at this cap stand to benefit most from the Series A repricing.
-      </p>
-    </div>
-  );
-}
-
+// ─── TERMS ─────────────────────────────────────────────────────
 function TermsSection() {
   const terms = [
     { label: "Raising", value: formatCurrency(FUNDING_CONFIG.goal) },
@@ -584,10 +553,6 @@ function TermsSection() {
               Projected return: {FUNDING_CONFIG.projectedReturn} by {FUNDING_CONFIG.projectedYear} based on
               market capture model.
             </p>
-          </ScrollReveal>
-
-          <ScrollReveal delay={0.3}>
-            <ProgressBar />
           </ScrollReveal>
         </div>
       </div>
@@ -679,42 +644,117 @@ function BookCallSection() {
   );
 }
 
-// ─── COMMUNITY ROUND ──────────────────────────────────────────
-function CommunitySection() {
+// ─── EMAIL CAPTURE / INVESTOR INTEREST ─────────────────────────
+function InvestorInterestSection() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "duplicate">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || status === "loading") return;
+
+    setStatus("loading");
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, source: "funded" }),
+      });
+
+      if (res.status === 201) {
+        setStatus("success");
+      } else if (res.status === 409) {
+        setStatus("duplicate");
+      } else {
+        const data = await res.json();
+        setErrorMsg(data.error || "Something went wrong.");
+        setStatus("error");
+      }
+    } catch {
+      setErrorMsg("Something went wrong.");
+      setStatus("error");
+    }
+  };
+
   return (
-    <section className="section-cream" style={{ padding: "clamp(60px,8vh,120px) 0" }}>
+    <section id="investor-interest" className="section-cream" style={{ padding: "clamp(80px,12vh,160px) 0" }}>
       <div className="max-w-container mx-auto px-6 md:px-12 text-center">
         <ScrollReveal>
-          <h2 className="font-serif text-subsection text-[var(--text-on-light)] mb-4">
-            Join the Community Round
+          <h2 className="font-serif text-section text-[var(--text-on-light)] mb-4">
+            Get In Early
           </h2>
         </ScrollReveal>
 
         <ScrollReveal delay={0.1}>
-          <p className="text-[15px] leading-[1.7] text-[var(--text-on-light-muted)] max-w-[560px] mx-auto mb-8">
-            Investing under $25K? We&apos;re opening a community round on Wefunder. Minimum $100.
-            Be part of the first believers.
+          <p className="text-[15px] leading-[1.7] text-[var(--text-on-light-muted)] max-w-[520px] mx-auto mb-3">
+            Leave your email and we&apos;ll send you the deck, terms, and next steps.
+            No spam. Just the opportunity.
+          </p>
+          <p className="text-[13px] text-[var(--text-on-light-muted)] opacity-60 mb-8">
+            Minimum investment: {formatCurrency(FUNDING_CONFIG.minInvestment)}
           </p>
         </ScrollReveal>
 
         <ScrollReveal delay={0.2}>
-          {WEFUNDER_URL ? (
-            <a
-              href={WEFUNDER_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block px-8 py-3.5 rounded-pill text-[15px] font-semibold transition-all duration-200"
-              style={{ backgroundColor: "var(--text-on-light)", color: "var(--cream)" }}
+          {status === "success" ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="max-w-[440px] mx-auto"
             >
-              Invest on Wefunder
-            </a>
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="12" fill="#C9A227" />
+                  <path d="M7 12 L10 15 L17 8" stroke="#0C0C0C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <p className="text-[16px] font-medium text-[var(--text-on-light)]">
+                  You&apos;re on the list.
+                </p>
+              </div>
+              <p className="text-[14px] text-[var(--text-on-light-muted)]">
+                We&apos;ll be in touch within 24 hours with your investor packet.
+              </p>
+            </motion.div>
+          ) : status === "duplicate" ? (
+            <p className="text-[15px] text-[var(--text-on-light-muted)]">
+              You&apos;re already on the list. We&apos;ll be in touch soon.
+            </p>
           ) : (
-            <span
-              className="inline-block px-8 py-3.5 rounded-pill text-[15px] font-medium border"
-              style={{ color: "var(--text-on-light-muted)", borderColor: "var(--cream-border)" }}
-            >
-              Coming Soon
-            </span>
+            <form onSubmit={handleSubmit} className="max-w-[440px] mx-auto">
+              <div className="flex gap-3">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  required
+                  className="flex-1 px-5 py-3.5 rounded-pill text-[15px] outline-none transition-all duration-200"
+                  style={{
+                    backgroundColor: "var(--cream-muted)",
+                    color: "var(--text-on-light)",
+                    border: "1px solid var(--cream-border)",
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#C9A227")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "var(--cream-border)")}
+                />
+                <button
+                  type="submit"
+                  disabled={status === "loading"}
+                  className="px-6 py-3.5 rounded-pill text-[15px] font-semibold transition-all duration-200 flex-shrink-0"
+                  style={{
+                    backgroundColor: "#C9A227",
+                    color: "var(--dark)",
+                    opacity: status === "loading" ? 0.7 : 1,
+                  }}
+                >
+                  {status === "loading" ? "..." : "I\u2019m In"}
+                </button>
+              </div>
+              {status === "error" && (
+                <p className="text-[13px] mt-3" style={{ color: "#c44" }}>{errorMsg}</p>
+              )}
+            </form>
           )}
         </ScrollReveal>
       </div>
@@ -847,7 +887,7 @@ export default function FundedPage() {
       <div className="transition-cream-to-dark" />
       <BookCallSection />
       <div className="transition-dark-to-cream" />
-      <CommunitySection />
+      <InvestorInterestSection />
       <div className="transition-cream-to-dark" />
       <FAQSection />
       <FundedFooter />
