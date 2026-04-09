@@ -71,12 +71,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Send welcome email (don't block the response)
+    // Send welcome email(s) (don't block the response)
     const trimmedName = name?.trim() || null;
+    sendWaitlistWelcome(normalizedEmail, trimmedName).catch(console.error);
     if (source === "funded") {
       sendInvestorWelcome(normalizedEmail, trimmedName).catch(console.error);
-    } else {
-      sendWaitlistWelcome(normalizedEmail, trimmedName).catch(console.error);
     }
 
     return NextResponse.json({ success: true }, { status: 201 });

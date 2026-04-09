@@ -40,9 +40,7 @@ export async function sendInvestorWelcome(email: string, name?: string | null) {
     <li>This is pre-seed — the earliest possible stage to get in</li>
   </ul>
 
-  <p style="font-size: 16px;">Here's the full deck if you want to dig deeper: <a href="https://anticipy.ai/anticipy-deck.pdf" style="color: #C9A227;">Download Pitch Deck</a></p>
-
-  <p style="font-size: 16px;">I'd love to walk you through the full picture on a call. No pitch deck presentation — just a real conversation about where this is going and why now is the moment.</p>
+  <p style="font-size: 16px;">I'd love to walk you through the full picture on a call — including the deck. No slide presentation, just a real conversation about where this is going and why now is the moment.</p>
 
   <p style="text-align: center; margin: 32px 0;">
     <a href="${CAL_LINK}" style="display: inline-block; padding: 14px 32px; background-color: #C9A227; color: #0C0C0C; text-decoration: none; border-radius: 100px; font-weight: 600; font-size: 15px;">Book 30 Minutes with Me</a>
@@ -75,22 +73,16 @@ export async function sendWaitlistWelcome(email: string, name?: string | null) {
   await sgMail.send({
     to: email,
     from: { email: FROM_EMAIL, name: FROM_NAME },
-    subject: "You're on the Anticipy list",
+    subject: "Welcome to the Anticipy waitlist",
     html: `
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a; line-height: 1.7;">
   <p style="font-size: 16px;">${greeting},</p>
 
-  <p style="font-size: 16px;">You're in. When Anticipy is ready, you'll be the first to know.</p>
+  <p style="font-size: 16px;">Welcome to the waitlist. You're officially one of the first people following what we're building.</p>
 
-  <p style="font-size: 16px;">We're building something different — an AI wearable that doesn't just listen and take notes. It actually handles things for you. Books the appointment, sends the follow-up, files the claim. You wear it, forget it's there, and your life just starts working better.</p>
+  <p style="font-size: 16px;">Anticipy is an AI wearable that doesn't just listen — it acts. It handles real tasks for you: books appointments, sends follow-ups, fills out forms. You wear it, forget it's there, and things just get done.</p>
 
-  <p style="font-size: 16px;">Hardware prototype is targeting later this year. We'll reach out the moment there's something to show you.</p>
-
-  <p style="font-size: 16px;">In the meantime, if you're curious about investing early — we're raising a small pre-seed round:</p>
-
-  <p style="text-align: center; margin: 32px 0;">
-    <a href="https://anticipy.ai/funded" style="display: inline-block; padding: 14px 32px; background-color: #0C0C0C; color: #F5F0EB; text-decoration: none; border-radius: 100px; font-weight: 600; font-size: 15px;">Learn About Investing</a>
-  </p>
+  <p style="font-size: 16px;">We'll keep you posted as things progress. When there's something to show, you'll be the first to know.</p>
 
   <p style="font-size: 16px;">Thanks for believing early.</p>
 
