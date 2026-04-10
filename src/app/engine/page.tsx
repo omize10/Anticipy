@@ -70,6 +70,8 @@ export default function EnginePage() {
   const [duration, setDuration] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const [manualTranscript, setManualTranscript] = useState("");
+  const [liveText, setLiveText] = useState("");
+  const [calendarConnected, setCalendarConnected] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -78,6 +80,18 @@ export default function EnginePage() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
+  const dgSocketRef = useRef<WebSocket | null>(null);
+  const liveSegmentsRef = useRef<TranscriptSegment[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+
+  // Check if Google Calendar is connected
+  useEffect(() => {
+    fetch("/api/auth/google/status")
+      .then((r) => r.json())
+      .then((d) => setCalendarConnected(d.connected))
+      .catch(() => {});
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -86,6 +100,12 @@ export default function EnginePage() {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      if (dgSocketRef.current) {
+        dgSocketRef.current.close();
+      }
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close();
       }
     };
   }, []);
@@ -96,6 +116,8 @@ export default function EnginePage() {
       setSegments([]);
       setIntents([]);
       setDuration(0);
+      setLiveText("");
+      liveSegmentsRef.current = [];
 
       // Create session
       const sessionRes = await fetch("/api/engine/session", {
@@ -104,6 +126,14 @@ export default function EnginePage() {
       const sessionData = await sessionRes.json();
       if (!sessionRes.ok) throw new Error(sessionData.error);
       sessionIdRef.current = sessionData.sessionId;
+
+      // Get temporary Deepgram key for browser-side streaming
+      const keyRes = await fetch("/api/engine/deepgram-key");
+      const keyData = await keyRes.json();
+
+      if (!keyRes.ok) {
+        throw new Error(keyData.error || "Failed to get Deepgram key");
+      }
 
       // Get microphone
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -116,7 +146,8 @@ export default function EnginePage() {
       streamRef.current = stream;
 
       // Audio level visualization
-      const audioCtx = new AudioContext();
+      const audioCtx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
@@ -133,19 +164,109 @@ export default function EnginePage() {
       };
       updateLevel();
 
-      // MediaRecorder
+      // Connect to Deepgram WebSocket for real-time streaming
+      const dgParams = new URLSearchParams({
+        model: "nova-3",
+        diarize: "true",
+        punctuate: "true",
+        language: "en",
+        smart_format: "true",
+        interim_results: "true",
+        endpointing: "300",
+        encoding: "linear16",
+        sample_rate: "16000",
+        channels: "1",
+      });
+
+      const dgWs = new WebSocket(
+        `wss://api.deepgram.com/v1/listen?${dgParams}`,
+        ["token", keyData.key]
+      );
+      dgSocketRef.current = dgWs;
+
+      dgWs.onopen = () => {
+        // Stream audio via ScriptProcessorNode (converts to linear16)
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        processorRef.current = processor;
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+
+        processor.onaudioprocess = (e) => {
+          if (dgWs.readyState !== WebSocket.OPEN) return;
+          const inputData = e.inputBuffer.getChannelData(0);
+          // Convert float32 to int16
+          const int16 = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          dgWs.send(int16.buffer);
+        };
+      };
+
+      dgWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "Results" && msg.channel) {
+            const alt = msg.channel.alternatives?.[0];
+            if (!alt) return;
+
+            const isFinal = msg.is_final;
+            const transcript = alt.transcript;
+
+            if (isFinal && transcript) {
+              // Process final words with speaker info
+              const words = alt.words || [];
+              if (words.length > 0) {
+                // Group consecutive words by speaker
+                let current: TranscriptSegment | null = null;
+                const newSegments: TranscriptSegment[] = [];
+
+                for (const w of words) {
+                  if (!current || current.speaker_id !== (w.speaker ?? 0)) {
+                    if (current) newSegments.push(current);
+                    current = {
+                      speaker_id: w.speaker ?? 0,
+                      start_time: w.start,
+                      end_time: w.end,
+                      text: w.punctuated_word || w.word,
+                    };
+                  } else {
+                    current.end_time = w.end;
+                    current.text += " " + (w.punctuated_word || w.word);
+                  }
+                }
+                if (current) newSegments.push(current);
+
+                liveSegmentsRef.current = [...liveSegmentsRef.current, ...newSegments];
+                setSegments([...liveSegmentsRef.current]);
+              }
+              setLiveText("");
+            } else if (transcript) {
+              // Interim result — show as live preview
+              setLiveText(transcript);
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+
+      dgWs.onerror = (e) => {
+        console.error("Deepgram WebSocket error:", e);
+      };
+
+      // Also keep MediaRecorder for fallback/backup audio
       const recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
           : "audio/webm",
       });
-
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
-
-      recorder.start(1000); // 1s chunks
+      recorder.start(1000);
       mediaRecorderRef.current = recorder;
       setState("recording");
 
@@ -169,10 +290,24 @@ export default function EnginePage() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     setAudioLevel(0);
+    setLiveText("");
+
+    // Close Deepgram WebSocket
+    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+      // Send close frame to get final results
+      dgSocketRef.current.send(JSON.stringify({ type: "CloseStream" }));
+      // Wait a moment for final results
+      await new Promise((r) => setTimeout(r, 1000));
+      dgSocketRef.current.close();
+    }
+
+    // Stop ScriptProcessor
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+    }
 
     // Stop recorder
     const recorder = mediaRecorderRef.current;
-
     await new Promise<void>((resolve) => {
       recorder.onstop = () => resolve();
       recorder.stop();
@@ -183,40 +318,81 @@ export default function EnginePage() {
       streamRef.current.getTracks().forEach((t) => t.stop());
     }
 
-    const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+    // Close AudioContext
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+    }
 
-    // Transcribe
-    setState("transcribing");
-    try {
-      const formData = new FormData();
-      formData.append("audio", audioBlob, "recording.webm");
-      formData.append("sessionId", sessionIdRef.current);
+    const finalSegments = liveSegmentsRef.current;
 
-      const transcribeRes = await fetch("/api/engine/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-      const transcribeData = await transcribeRes.json();
+    if (finalSegments.length === 0) {
+      // Fall back to batch transcription if streaming produced nothing
+      setState("transcribing");
+      try {
+        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const formData = new FormData();
+        formData.append("audio", audioBlob, "recording.webm");
+        formData.append("sessionId", sessionIdRef.current);
 
-      if (!transcribeRes.ok)
-        throw new Error(transcribeData.error || "Transcription failed");
+        const transcribeRes = await fetch("/api/engine/transcribe", {
+          method: "POST",
+          body: formData,
+        });
+        const transcribeData = await transcribeRes.json();
+        if (!transcribeRes.ok) throw new Error(transcribeData.error);
 
-      if (!transcribeData.segments || transcribeData.segments.length === 0) {
-        setState("done");
-        setError("No speech detected in the recording. Try speaking louder or closer to the mic.");
-        return;
+        if (!transcribeData.segments?.length) {
+          setState("done");
+          setError("No speech detected. Try speaking louder or closer to the mic.");
+          return;
+        }
+
+        setSegments(transcribeData.segments);
+        await analyzeTranscript(transcribeData.transcript);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Processing failed";
+        setError(message);
+        setState("error");
       }
+      return;
+    }
 
-      setSegments(transcribeData.segments);
+    // Store streaming segments to Supabase
+    const rows = finalSegments.map((s) => ({
+      session_id: sessionIdRef.current,
+      speaker_id: s.speaker_id,
+      start_time: s.start_time,
+      end_time: s.end_time,
+      text: s.text,
+      is_final: true,
+    }));
 
-      // Analyze for intents
-      setState("analyzing");
+    fetch("/api/engine/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: sessionIdRef.current,
+        segments: rows,
+      }),
+    }).catch(() => {}); // Non-critical storage
+
+    // Build transcript string and analyze
+    const transcriptStr = finalSegments
+      .map((s) => `[Speaker ${s.speaker_id}]: ${s.text}`)
+      .join("\n");
+
+    await analyzeTranscript(transcriptStr);
+  }, []);
+
+  const analyzeTranscript = useCallback(async (transcript: string) => {
+    setState("analyzing");
+    try {
       const analyzeRes = await fetch("/api/engine/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
-          transcript: transcribeData.transcript,
+          transcript,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
@@ -229,7 +405,7 @@ export default function EnginePage() {
       setState("done");
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Processing failed";
+        err instanceof Error ? err.message : "Analysis failed";
       setError(message);
       setState("error");
     }
@@ -280,43 +456,14 @@ export default function EnginePage() {
       }
       setSegments(parsedSegments);
 
-      // Store transcript segments
-      if (parsedSegments.length > 0) {
-        await fetch("/api/engine/transcribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: sessionIdRef.current,
-            segments: parsedSegments,
-          }),
-        }).catch(() => {}); // Non-critical
-      }
-
-      // Analyze
-      setState("analyzing");
-      const analyzeRes = await fetch("/api/engine/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: sessionIdRef.current,
-          transcript: manualTranscript,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }),
-      });
-      const analyzeData = await analyzeRes.json();
-
-      if (!analyzeRes.ok)
-        throw new Error(analyzeData.error || "Analysis failed");
-
-      setIntents(analyzeData.intents ?? []);
-      setState("done");
+      await analyzeTranscript(manualTranscript);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Analysis failed";
       setError(message);
       setState("error");
     }
-  }, [manualTranscript]);
+  }, [manualTranscript, analyzeTranscript]);
 
   const reset = useCallback(() => {
     setState("idle");
@@ -324,7 +471,9 @@ export default function EnginePage() {
     setIntents([]);
     setError("");
     setDuration(0);
+    setLiveText("");
     setManualTranscript("");
+    liveSegmentsRef.current = [];
   }, []);
 
   const formatDuration = (secs: number) => {
@@ -351,12 +500,44 @@ export default function EnginePage() {
           <a href="/" className="font-serif text-[22px]">
             Anticipy
           </a>
-          <span
-            className="text-[13px] font-light tracking-wide-label uppercase"
-            style={{ color: "var(--gold)" }}
-          >
-            Engine
-          </span>
+          <div className="flex items-center gap-4">
+            {!calendarConnected && (
+              <a
+                href="/api/auth/google"
+                className="text-[12px] px-3 py-1.5 rounded-pill transition-all"
+                style={{
+                  background: "rgba(200,169,126,0.1)",
+                  color: "var(--gold)",
+                  border: "1px solid rgba(200,169,126,0.2)",
+                }}
+              >
+                Connect Calendar
+              </a>
+            )}
+            {calendarConnected && (
+              <span
+                className="text-[12px] flex items-center gap-1.5"
+                style={{ color: "#4CAF50" }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "#4CAF50",
+                    display: "inline-block",
+                  }}
+                />
+                Calendar linked
+              </span>
+            )}
+            <span
+              className="text-[13px] font-light tracking-wide-label uppercase"
+              style={{ color: "var(--gold)" }}
+            >
+              Engine
+            </span>
+          </div>
         </div>
       </header>
 
@@ -384,7 +565,7 @@ export default function EnginePage() {
             {state === "recording" &&
               `Recording — ${formatDuration(duration)}`}
             {state === "transcribing" &&
-              "Deepgram Nova-3 is processing your audio with speaker diarization..."}
+              "Processing your audio with speaker diarization..."}
             {state === "analyzing" &&
               "Analyzing your conversation for actionable moments..."}
             {state === "done" &&
@@ -488,6 +669,47 @@ export default function EnginePage() {
           )}
         </div>
 
+        {/* Live transcript during recording */}
+        {state === "recording" && (segments.length > 0 || liveText) && (
+          <div className="max-w-2xl mx-auto mb-8">
+            <h2
+              className="text-[13px] font-light tracking-wide-label uppercase mb-4"
+              style={{ color: "var(--text-on-dark-muted)" }}
+            >
+              Live Transcript
+            </h2>
+            <div
+              className="rounded-card p-6 space-y-3 max-h-[300px] overflow-y-auto"
+              style={{
+                background: "var(--dark-elevated)",
+                border: "1px solid var(--dark-border)",
+              }}
+            >
+              {segments.map((seg, i) => (
+                <div key={i}>
+                  <span
+                    className="text-[12px] font-medium mr-2"
+                    style={{
+                      color:
+                        SPEAKER_COLORS[seg.speaker_id % SPEAKER_COLORS.length],
+                    }}
+                  >
+                    Speaker {seg.speaker_id}
+                  </span>
+                  <span className="text-[15px] font-light">{seg.text}</span>
+                </div>
+              ))}
+              {liveText && (
+                <div style={{ opacity: 0.5 }}>
+                  <span className="text-[15px] font-light italic">
+                    {liveText}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Manual transcript input (fallback) */}
         {state === "idle" && (
           <div className="max-w-2xl mx-auto mb-16">
@@ -532,128 +754,129 @@ export default function EnginePage() {
         )}
 
         {/* Results */}
-        {(segments.length > 0 || intents.length > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
-            {/* Transcript */}
-            {segments.length > 0 && (
-              <div>
-                <h2
-                  className="text-[13px] font-light tracking-wide-label uppercase mb-4"
-                  style={{ color: "var(--text-on-dark-muted)" }}
-                >
-                  Transcript
-                </h2>
-                <div
-                  className="rounded-card p-6 space-y-3 max-h-[500px] overflow-y-auto"
-                  style={{
-                    background: "var(--dark-elevated)",
-                    border: "1px solid var(--dark-border)",
-                  }}
-                >
-                  {segments.map((seg, i) => (
-                    <div key={i}>
-                      <span
-                        className="text-[12px] font-medium mr-2"
-                        style={{
-                          color:
-                            SPEAKER_COLORS[
-                              seg.speaker_id % SPEAKER_COLORS.length
-                            ],
-                        }}
-                      >
-                        Speaker {seg.speaker_id}
-                      </span>
-                      <span className="text-[15px] font-light">
-                        {seg.text}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            {intents.length > 0 && (
-              <div>
-                <h2
-                  className="text-[13px] font-light tracking-wide-label uppercase mb-4"
-                  style={{ color: "var(--text-on-dark-muted)" }}
-                >
-                  Actions
-                </h2>
-                <div className="space-y-4">
-                  {intents.map((intent) => {
-                    const style =
-                      IMPORTANCE_STYLES[intent.importance] ??
-                      IMPORTANCE_STYLES.low;
-                    return (
-                      <div
-                        key={intent.id}
-                        className="rounded-card p-5"
-                        style={{
-                          background: style.bg,
-                          border: `1px solid ${style.border}`,
-                        }}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <span
-                            className="text-[11px] uppercase tracking-wide-label px-2 py-0.5 rounded-pill"
-                            style={{
-                              background: style.border,
-                              color: "var(--text-on-dark)",
-                            }}
-                          >
-                            {style.label}
-                          </span>
-                          <span
-                            className="text-[12px]"
-                            style={{
-                              color: "var(--text-on-dark-muted)",
-                            }}
-                          >
-                            {Math.round(intent.confidence * 100)}%
-                          </span>
-                        </div>
-                        <p className="text-[15px] font-medium mb-2">
-                          {intent.summary_for_user}
-                        </p>
-                        <p
-                          className="text-[13px] font-light italic"
+        {state !== "recording" &&
+          (segments.length > 0 || intents.length > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
+              {/* Transcript */}
+              {segments.length > 0 && (
+                <div>
+                  <h2
+                    className="text-[13px] font-light tracking-wide-label uppercase mb-4"
+                    style={{ color: "var(--text-on-dark-muted)" }}
+                  >
+                    Transcript
+                  </h2>
+                  <div
+                    className="rounded-card p-6 space-y-3 max-h-[500px] overflow-y-auto"
+                    style={{
+                      background: "var(--dark-elevated)",
+                      border: "1px solid var(--dark-border)",
+                    }}
+                  >
+                    {segments.map((seg, i) => (
+                      <div key={i}>
+                        <span
+                          className="text-[12px] font-medium mr-2"
                           style={{
-                            color: "var(--text-on-dark-muted)",
+                            color:
+                              SPEAKER_COLORS[
+                                seg.speaker_id % SPEAKER_COLORS.length
+                              ],
                           }}
                         >
-                          &ldquo;{intent.evidence_quote}&rdquo;
-                        </p>
-                        <div className="mt-3 flex items-center gap-2">
-                          <span
-                            className="text-[12px] px-3 py-1 rounded-pill"
-                            style={{
-                              background: "rgba(200,169,126,0.1)",
-                              color: "var(--gold)",
-                              border:
-                                "1px solid rgba(200,169,126,0.2)",
-                            }}
-                          >
-                            {intent.action_type.replace("_", " ")}
-                          </span>
-                          <span
-                            className="text-[12px]"
+                          Speaker {seg.speaker_id}
+                        </span>
+                        <span className="text-[15px] font-light">
+                          {seg.text}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              {intents.length > 0 && (
+                <div>
+                  <h2
+                    className="text-[13px] font-light tracking-wide-label uppercase mb-4"
+                    style={{ color: "var(--text-on-dark-muted)" }}
+                  >
+                    Actions
+                  </h2>
+                  <div className="space-y-4">
+                    {intents.map((intent) => {
+                      const style =
+                        IMPORTANCE_STYLES[intent.importance] ??
+                        IMPORTANCE_STYLES.low;
+                      return (
+                        <div
+                          key={intent.id}
+                          className="rounded-card p-5"
+                          style={{
+                            background: style.bg,
+                            border: `1px solid ${style.border}`,
+                          }}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <span
+                              className="text-[11px] uppercase tracking-wide-label px-2 py-0.5 rounded-pill"
+                              style={{
+                                background: style.border,
+                                color: "var(--text-on-dark)",
+                              }}
+                            >
+                              {style.label}
+                            </span>
+                            <span
+                              className="text-[12px]"
+                              style={{
+                                color: "var(--text-on-dark-muted)",
+                              }}
+                            >
+                              {Math.round(intent.confidence * 100)}%
+                            </span>
+                          </div>
+                          <p className="text-[15px] font-medium mb-2">
+                            {intent.summary_for_user}
+                          </p>
+                          <p
+                            className="text-[13px] font-light italic"
                             style={{
                               color: "var(--text-on-dark-muted)",
                             }}
                           >
-                            Email sent
-                          </span>
+                            &ldquo;{intent.evidence_quote}&rdquo;
+                          </p>
+                          <div className="mt-3 flex items-center gap-2">
+                            <span
+                              className="text-[12px] px-3 py-1 rounded-pill"
+                              style={{
+                                background: "rgba(200,169,126,0.1)",
+                                color: "var(--gold)",
+                                border:
+                                  "1px solid rgba(200,169,126,0.2)",
+                              }}
+                            >
+                              {intent.action_type.replace("_", " ")}
+                            </span>
+                            <span
+                              className="text-[12px]"
+                              style={{
+                                color: "var(--text-on-dark-muted)",
+                              }}
+                            >
+                              Notification sent
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
 
         {/* Empty state for done with no intents */}
         {state === "done" && intents.length === 0 && segments.length > 0 && (

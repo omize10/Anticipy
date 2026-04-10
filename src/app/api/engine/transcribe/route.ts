@@ -6,6 +6,34 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
+    const contentType = req.headers.get("content-type") || "";
+
+    // JSON path: store pre-transcribed segments from streaming
+    if (contentType.includes("application/json")) {
+      const { sessionId, segments } = await req.json();
+      if (!sessionId || !segments?.length) {
+        return NextResponse.json({ ok: true });
+      }
+
+      const { error: insertError } = await supabaseAdmin
+        .from("anticipy_transcripts")
+        .insert(segments.map((s: Record<string, unknown>) => ({
+          session_id: sessionId,
+          speaker_id: s.speaker_id ?? 0,
+          start_time: s.start_time ?? 0,
+          end_time: s.end_time ?? 0,
+          text: s.text ?? "",
+          is_final: true,
+        })));
+
+      if (insertError) {
+        console.error("Supabase insert error:", insertError);
+      }
+
+      return NextResponse.json({ ok: true, stored: segments.length });
+    }
+
+    // FormData path: upload audio for batch transcription
     const formData = await req.formData();
     const audioFile = formData.get("audio") as File | null;
     const sessionId = formData.get("sessionId") as string | null;
@@ -77,4 +105,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { callKimi } from "@/lib/kimi";
 import { callGroq } from "@/lib/groq";
 import { buildIntentPrompt } from "@/lib/intent-prompt";
 import { sendIntentEmail } from "@/lib/resend-notify";
+import { sendTwilioNotification } from "@/lib/twilio-notify";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -42,16 +44,32 @@ export async function POST(req: Request) {
       recentActions
     );
 
-    const response = await callGroq(
-      [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      {
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-      }
-    );
+    // Kimi K2.5 primary, Groq fallback
+    let response: string;
+    try {
+      response = await callKimi(
+        [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        {
+          // Kimi K2.5 only accepts temperature=1
+          response_format: { type: "json_object" },
+        }
+      );
+    } catch (kimiErr) {
+      console.warn("Kimi failed, falling back to Groq:", kimiErr);
+      response = await callGroq(
+        [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        {
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+        }
+      );
+    }
 
     let parsed: { intents: Array<Record<string, unknown>> };
     try {
@@ -118,6 +136,17 @@ export async function POST(req: Request) {
           recipient: notifyEmail,
           status: "sent",
         });
+      }
+
+      // Send SMS/Voice notification via Twilio (mock mode if no credentials)
+      const notifyPhone = process.env.TEST_USER_PHONE;
+      if (notifyPhone) {
+        await sendTwilioNotification(
+          notifyPhone,
+          intent.summary_for_user as string,
+          intent.importance as string,
+          data.id
+        );
       }
     }
 
