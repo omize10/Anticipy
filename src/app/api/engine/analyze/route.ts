@@ -45,37 +45,39 @@ export async function POST(req: Request) {
     );
 
     // Kimi K2.5 primary, Groq fallback
-    let response: string;
+    const llmMessages = [
+      { role: "system" as const, content: system },
+      { role: "user" as const, content: user },
+    ];
+
+    let response: string = "";
+    let usedModel = "kimi";
+
     try {
-      response = await callKimi(
-        [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        {
-          // Kimi K2.5 only accepts temperature=1
-          response_format: { type: "json_object" },
-        }
-      );
+      response = await callKimi(llmMessages, {
+        response_format: { type: "json_object" },
+      });
+      // Validate response is non-empty and valid JSON
+      if (!response || response.trim().length === 0) {
+        throw new Error("Kimi returned empty response");
+      }
+      JSON.parse(response); // test parse
     } catch (kimiErr) {
       console.warn("Kimi failed, falling back to Groq:", kimiErr);
-      response = await callGroq(
-        [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        {
-          temperature: 0.1,
-          response_format: { type: "json_object" },
-        }
-      );
+      usedModel = "groq";
+      response = await callGroq(llmMessages, {
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      });
     }
+
+    console.log(`Intent analysis completed via ${usedModel}, response length: ${response.length}`);
 
     let parsed: { intents: Array<Record<string, unknown>> };
     try {
       parsed = JSON.parse(response);
     } catch {
-      console.error("Failed to parse Groq response:", response);
+      console.error("Failed to parse LLM response:", response?.substring(0, 200));
       parsed = { intents: [] };
     }
 
@@ -112,7 +114,11 @@ export async function POST(req: Request) {
       const intentWithId = { ...intent, id: data.id };
       storedIntents.push(intentWithId);
 
-      // Send email notification
+      // Importance-based notification dispatch:
+      // critical → voice + SMS + email
+      // important/standard → SMS + email
+      // low → email only
+      const importance = intent.importance as string;
       const notifyEmail =
         process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
       const baseUrl =
@@ -121,11 +127,12 @@ export async function POST(req: Request) {
           ? `https://${process.env.VERCEL_URL}`
           : "http://localhost:3000");
 
+      // Email for ALL importance levels
       const emailResult = await sendIntentEmail(notifyEmail, {
         intentId: data.id,
         summary: intent.summary_for_user as string,
         evidenceQuote: intent.evidence_quote as string,
-        importance: intent.importance as string,
+        importance,
         actionType: intent.action_type as string,
       }, baseUrl);
 
@@ -138,13 +145,13 @@ export async function POST(req: Request) {
         });
       }
 
-      // Send SMS/Voice notification via Twilio (mock mode if no credentials)
+      // SMS + Voice for non-low importance levels
       const notifyPhone = process.env.TEST_USER_PHONE;
-      if (notifyPhone) {
+      if (notifyPhone && importance !== "low") {
         await sendTwilioNotification(
           notifyPhone,
           intent.summary_for_user as string,
-          intent.importance as string,
+          importance,
           data.id
         );
       }

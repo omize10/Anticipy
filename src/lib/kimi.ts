@@ -33,6 +33,10 @@ export async function callKimi(
     body.response_format = response_format;
   }
 
+  // 90-second timeout — Kimi K2.5 is a reasoning model (~70s typical)
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+
   const res = await fetch(KIMI_URL, {
     method: "POST",
     headers: {
@@ -40,7 +44,10 @@ export async function callKimi(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: controller.signal,
   });
+
+  clearTimeout(timeout);
 
   if (!res.ok) {
     const err = await res.text();

@@ -85,7 +85,8 @@ export async function sendSMS(
 }
 
 /**
- * Initiate a voice call with a TwiML message. Falls back to mock mode when credentials are unavailable.
+ * Initiate a voice call with interactive TwiML (Gather for speech/DTMF).
+ * Uses a TwiML URL endpoint for dynamic voice script with user response handling.
  */
 export async function sendVoiceCall(
   to: string,
@@ -96,12 +97,14 @@ export async function sendVoiceCall(
     console.log(`[TWILIO MOCK] Voice call to ${to}: ${message}`);
 
     if (intentId) {
-      await supabaseAdmin.from("anticipy_notifications").insert({
-        intent_id: intentId,
-        channel: "voice",
-        recipient: to,
-        status: "mock_sent",
-      });
+      try {
+        await supabaseAdmin.from("anticipy_notifications").insert({
+          intent_id: intentId,
+          channel: "voice",
+          recipient: to,
+          status: "mock_sent",
+        });
+      } catch { /* non-critical */ }
     }
 
     return { success: true, sid: `MOCK_CA_${Date.now()}`, mock: true };
@@ -111,14 +114,26 @@ export async function sendVoiceCall(
     const url = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`;
     const auth = Buffer.from(`${TWILIO_SID}:${TWILIO_TOKEN}`).toString("base64");
 
-    // Use TwiML to speak the message
-    const twiml = `<Response><Say voice="alice">${escapeXml(message)}</Say><Pause length="1"/><Say voice="alice">Reply yes to confirm or no to skip.</Say></Response>`;
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      (process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "http://localhost:3000");
 
-    const params = new URLSearchParams({
+    // Use TwiML URL for interactive voice calls (with Gather for user input)
+    const callParams: Record<string, string> = {
       To: to,
       From: TWILIO_PHONE!,
-      Twiml: twiml,
-    });
+    };
+
+    if (intentId) {
+      // Use the dynamic TwiML endpoint with Gather for speech/DTMF input
+      callParams.Url = `${baseUrl}/api/engine/twilio/voice-script/${intentId}`;
+      callParams.Method = "POST";
+    } else {
+      // Fallback to inline TwiML for non-intent calls
+      callParams.Twiml = `<Response><Say voice="Polly.Joanna">${escapeXml(message)}</Say></Response>`;
+    }
 
     const res = await fetch(url, {
       method: "POST",
@@ -126,7 +141,7 @@ export async function sendVoiceCall(
         Authorization: `Basic ${auth}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: params.toString(),
+      body: new URLSearchParams(callParams).toString(),
     });
 
     if (!res.ok) {
