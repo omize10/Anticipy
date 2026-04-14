@@ -87,6 +87,50 @@ def _get_llm():
     raise RuntimeError("No LLM API key found. Set GOOGLE_API_KEY or GROQ_API_KEY.")
 
 
+def _sanitize_status(text: str) -> str:
+    """
+    Strip technical terms from LLM-generated step descriptions before showing to users.
+    next_goal can contain words like 'JavaScript', 'JSON', model names, etc.
+    """
+    import re
+    replacements = [
+        ("javascript", "a script"),
+        ("xpath", "the element"),
+        ("css selector", "the element"),
+        ("dom element", "the element"),
+        ("iframe", "the page section"),
+        ("accessibility tree", "the page"),
+        ("playwright", "the browser"),
+        ("patchright", "the browser"),
+        ("chromium", "the browser"),
+        ("webdriver", "the browser"),
+        ("api call", "a request"),
+        ("http request", "a request"),
+        ("json response", "the data"),
+        ("json", "data"),
+        ("groq", "the AI"),
+        ("gemini", "the AI"),
+        ("llama", "the AI"),
+        ("deepseek", "the AI"),
+        ("fastapi", "the server"),
+        ("supabase", "the database"),
+        ("python", "the system"),
+        ("async", ""),
+        ("await", ""),
+    ]
+    text_lower = text.lower()
+    for term, replacement in replacements:
+        if term in text_lower:
+            if replacement:
+                text = re.sub(re.escape(term), replacement, text, flags=re.IGNORECASE)
+            else:
+                text = re.sub(r'\b' + re.escape(term) + r'\b', "", text, flags=re.IGNORECASE)
+            text_lower = text.lower()
+    # Clean up double spaces
+    text = re.sub(r"  +", " ", text).strip()
+    return text
+
+
 def _get_domain(url: str) -> str:
     try:
         return urlparse(url).netloc
@@ -224,11 +268,11 @@ class EngineAgent:
         # Use next_goal for more descriptive status if available
         description = status_msg.rstrip(".")
         if agent_output and agent_output.next_goal:
-            # Use a simplified version of next_goal
-            goal_text = agent_output.next_goal[:60]
-            if len(agent_output.next_goal) > 60:
+            # Use a simplified version of next_goal, sanitized to remove technical terms
+            goal_text = agent_output.next_goal[:80]
+            if len(agent_output.next_goal) > 80:
                 goal_text += "..."
-            description = goal_text
+            description = _sanitize_status(goal_text)
 
         progress = msg.STEP_PROGRESS.format(current=step_num, description=description)
         await _send_status(self.send, progress)
@@ -265,13 +309,17 @@ class EngineAgent:
             )
             os.makedirs(profile_dir, exist_ok=True)
 
-            # Build chrome args for stealth
+            # Build chrome args for stealth and stability
             chrome_args = [
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-infobars",
                 "--window-size=1920,1080",
+                # Software WebGL fallback to prevent crashes on GPU-intensive pages
+                "--use-gl=swiftshader",
+                "--no-first-run",
+                "--no-default-browser-check",
             ]
 
             # NopeCHA extension for CAPTCHA solving
@@ -475,8 +523,10 @@ def _sanitize_output(text: str) -> str:
     # Technical terms that should never appear in user-facing output
     tech_terms_to_strip = [
         "javascript", "xpath", "css selector", "dom element", "iframe",
-        "accessibility tree", "playwright", "chromium", "webdriver",
+        "accessibility tree", "playwright", "patchright", "chromium", "webdriver",
         "api call", "http request", "json response",
+        "groq", "gemini", "llama", "deepseek",
+        "supabase", "fastapi", "httpx",
     ]
 
     text_lower = text.lower()
