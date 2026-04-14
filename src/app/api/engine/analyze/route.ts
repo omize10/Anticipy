@@ -83,6 +83,7 @@ export async function POST(req: Request) {
       response = await callKimi(llmMessages, {
         response_format: { type: "json_object" },
         temperature: 0.1, // Low temperature for reliable structured JSON output
+        max_tokens: 8192, // Reasoning field needs space
       });
       if (!response || response.trim().length === 0) {
         throw new Error("Kimi returned empty response");
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
         response = await callGroq(llmMessages, {
           temperature: 0.1,
           response_format: { type: "json_object" },
+          max_tokens: 8192,
         });
       } catch (groqErr) {
         console.error("Groq fallback also failed:", groqErr);
@@ -111,7 +113,7 @@ export async function POST(req: Request) {
       `Intent analysis completed via ${usedModel}, response length: ${response.length}`
     );
 
-    let parsed: { intents: Array<Record<string, unknown>> };
+    let parsed: { reasoning?: string; intents: Array<Record<string, unknown>> };
     try {
       parsed = JSON.parse(response);
     } catch {
@@ -120,6 +122,11 @@ export async function POST(req: Request) {
         response?.substring(0, 200)
       );
       parsed = { intents: [] };
+    }
+
+    // Log the model's reasoning for debugging and quality monitoring
+    if (parsed.reasoning) {
+      console.log(`[${usedModel}] Intent reasoning:\n${parsed.reasoning}`);
     }
 
     const intents = parsed.intents ?? [];
