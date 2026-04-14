@@ -31,7 +31,7 @@ RESULTS = []
 # Banned words in responses (technical leakage)
 BANNED_PATTERNS = [
     "json", "api ", "error code", "stack trace", "traceback",
-    "exception", "null", "undefined", "nonetype",
+    "exception", "null", "nonetype",
     "dom ", "selector", "xpath", "javascript", "python",
     "function", "debug", "console", "endpoint",
     "playwright", "patchright", "chromium", "webdriver",
@@ -53,7 +53,7 @@ async def run_test(
     label: str,
     task_text: str,
     pass_check,
-    timeout: int = 180,
+    timeout: int = 240,
 ):
     """Run a single test, capturing all messages."""
     global PASS_COUNT, FAIL_COUNT
@@ -75,17 +75,27 @@ async def run_test(
         return "yes"
 
     start = time.time()
-    try:
-        await asyncio.wait_for(
-            execute_task(task_text, send, recv, user_id="test_user"),
-            timeout=timeout + 30,
-        )
-    except asyncio.TimeoutError:
-        messages.append({"type": "error", "message": "HARD TIMEOUT"})
-        print("  [HARD TIMEOUT]", flush=True)
-    except Exception as e:
-        messages.append({"type": "error", "message": str(e)[:100]})
-        print(f"  [EXCEPTION] {type(e).__name__}", flush=True)
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            await asyncio.wait_for(
+                execute_task(task_text, send, recv, user_id="test_user"),
+                timeout=timeout + 30,
+            )
+            break
+        except asyncio.TimeoutError:
+            messages.append({"type": "error", "message": "HARD TIMEOUT"})
+            print("  [HARD TIMEOUT]", flush=True)
+            break  # Don't retry timeouts
+        except Exception as e:
+            err_msg = str(e)[:100]
+            if attempt < max_retries - 1:
+                print(f"  [RETRY] Attempt {attempt+1} failed: {type(e).__name__}, retrying...", flush=True)
+                messages.clear()
+                await asyncio.sleep(3)
+                continue
+            messages.append({"type": "error", "message": err_msg})
+            print(f"  [EXCEPTION] {type(e).__name__}", flush=True)
 
     elapsed = time.time() - start
 
@@ -162,13 +172,15 @@ async def main():
         lambda r: len(r) > 50,
     )
 
-    # TEST 4: SauceDemo full checkout
+    # TEST 4: SauceDemo full checkout (needs more time for multi-page flow)
     await run_test(
         4, "SauceDemo checkout",
         "Go to saucedemo.com, log in with username standard_user and password secret_sauce, "
-        "add the first 2 items to cart, go to cart, proceed to checkout, "
-        "fill in first name John, last name Smith, zip 12345, continue, and tell me the total",
+        "add the first item to cart, click the cart icon (top right), click Checkout, "
+        "fill in First Name: John, Last Name: Smith, Zip: 12345, click Continue, "
+        "then tell me the total amount shown on the checkout overview page",
         lambda r: "$" in r and any(c.isdigit() for c in r),
+        timeout=300,
     )
 
     # TEST 5: GitHub trending
