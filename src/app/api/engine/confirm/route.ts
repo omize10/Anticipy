@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { createCalendarEvent } from "@/lib/google-calendar";
+import { executeAction } from "@/lib/execute-action";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +17,36 @@ export async function GET(req: Request) {
 
   const newStatus = action === "yes" ? "confirmed" : "rejected";
 
+  // Guard: only update intents that are still pending to prevent double-execution
+  // (user could click email link AND reply to SMS, or click the link twice).
+  const { data: currentIntent } = await supabaseAdmin
+    .from("anticipy_intents")
+    .select("status")
+    .eq("id", intentId)
+    .single();
+
+  if (!currentIntent) {
+    return new Response(renderPage("Error", "Intent not found."), {
+      headers: { "Content-Type": "text/html" },
+      status: 404,
+    });
+  }
+
+  if (currentIntent.status !== "pending") {
+    return new Response(
+      renderPage(
+        "Already Handled",
+        "This action has already been confirmed or skipped."
+      ),
+      { headers: { "Content-Type": "text/html" } }
+    );
+  }
+
   const { error } = await supabaseAdmin
     .from("anticipy_intents")
     .update({ status: newStatus })
-    .eq("id", intentId);
+    .eq("id", intentId)
+    .eq("status", "pending"); // Double-guard against TOCTOU race
 
   if (error) {
     return new Response(renderPage("Error", error.message), {
@@ -31,7 +57,6 @@ export async function GET(req: Request) {
 
   let executionMessage = "";
 
-  // If confirmed, execute the action
   if (newStatus === "confirmed") {
     const { data: intent } = await supabaseAdmin
       .from("anticipy_intents")
@@ -58,7 +83,6 @@ export async function GET(req: Request) {
     }
   }
 
-  const emoji = newStatus === "confirmed" ? "✅" : "⏭️";
   const mainMessage =
     newStatus === "confirmed"
       ? "Got it — executing now."
@@ -67,150 +91,24 @@ export async function GET(req: Request) {
   return new Response(
     renderPage(
       newStatus === "confirmed" ? "Confirmed" : "Skipped",
-      mainMessage + (executionMessage ? `<br><br><span style="font-size:13px;color:#C8A97E;">${executionMessage}</span>` : "")
+      mainMessage +
+        (executionMessage
+          ? `<br><br><span style="font-size:13px;color:#C8A97E;">${executionMessage}</span>`
+          : "")
     ),
     { headers: { "Content-Type": "text/html" } }
   );
 }
 
-interface ActionResult {
-  success: boolean;
-  message: string;
-  data: Record<string, unknown>;
-  externalId?: string;
-}
-
-async function executeAction(intent: Record<string, unknown>): Promise<ActionResult> {
-  const actionType = intent.action_type as string;
-  const params = (intent.parameters as Record<string, unknown>) || {};
-  const userEmail = process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
-
-  try {
-    switch (actionType) {
-      case "calendar_add": {
-        const event = await createCalendarEvent(userEmail, {
-          title: (params.title as string) || "Untitled Event",
-          startIso: (params.start_iso as string) || new Date().toISOString(),
-          endIso: (params.end_iso as string) || new Date(Date.now() + 3600000).toISOString(),
-          description: params.description as string,
-          location: params.location as string,
-          attendees: params.attendees as string[],
-          timezone: "America/Vancouver",
-        });
-        return {
-          success: true,
-          message: `Calendar event created: "${params.title}"`,
-          data: { eventId: event.eventId, htmlLink: event.htmlLink },
-          externalId: event.eventId,
-        };
-      }
-
-      case "reminder_add": {
-        // Create as a calendar event with a reminder
-        try {
-          const dueIso = (params.due_iso as string) || new Date(Date.now() + 3600000).toISOString();
-          const event = await createCalendarEvent(userEmail, {
-            title: `Reminder: ${params.text || "Reminder"}`,
-            startIso: dueIso,
-            endIso: dueIso,
-            description: `Reminder set by Anticipy: ${params.text}`,
-            timezone: "America/Vancouver",
-          });
-          return {
-            success: true,
-            message: `Reminder set: "${params.text}"`,
-            data: { eventId: event.eventId, htmlLink: event.htmlLink },
-            externalId: event.eventId,
-          };
-        } catch {
-          // Fallback: store as a note if calendar not connected
-          await supabaseAdmin.from("anticipy_notes").insert({
-            session_id: intent.session_id,
-            title: `Reminder: ${params.text || "Reminder"}`,
-            body: `Due: ${params.due_iso || "Not specified"}\n\n${params.text || ""}`,
-          });
-          return {
-            success: true,
-            message: `Reminder saved as note: "${params.text}"`,
-            data: { fallback: "note" },
-          };
-        }
-      }
-
-      case "note_add": {
-        const { error: noteErr } = await supabaseAdmin.from("anticipy_notes").insert({
-          session_id: intent.session_id,
-          title: (params.title as string) || "Untitled Note",
-          body: (params.body as string) || "",
-        });
-        if (noteErr) throw new Error(noteErr.message);
-        return {
-          success: true,
-          message: `Note saved: "${params.title}"`,
-          data: { title: params.title },
-        };
-      }
-
-      case "email_draft": {
-        // Store as a note with the draft content (actual Gmail draft creation needs separate OAuth)
-        await supabaseAdmin.from("anticipy_notes").insert({
-          session_id: intent.session_id,
-          title: `Email Draft: ${params.subject || "No subject"}`,
-          body: `To: ${params.recipient_name || "Unknown"}\nSubject: ${params.subject || ""}\n\n${params.body || ""}`,
-        });
-        return {
-          success: true,
-          message: `Email draft saved for ${params.recipient_name}: "${params.subject}"`,
-          data: { recipient: params.recipient_name, subject: params.subject },
-        };
-      }
-
-      case "message_draft": {
-        await supabaseAdmin.from("anticipy_notes").insert({
-          session_id: intent.session_id,
-          title: `Message to ${params.recipient_name || "Unknown"} (${params.channel || "sms"})`,
-          body: (params.body as string) || "",
-        });
-        return {
-          success: true,
-          message: `Message draft saved for ${params.recipient_name}`,
-          data: { recipient: params.recipient_name, channel: params.channel },
-        };
-      }
-
-      case "lookup": {
-        await supabaseAdmin.from("anticipy_notes").insert({
-          session_id: intent.session_id,
-          title: `Lookup: ${params.query || ""}`,
-          body: `Query: ${params.query}\nWhy: ${params.why_useful || ""}`,
-        });
-        return {
-          success: true,
-          message: `Lookup noted: "${params.query}"`,
-          data: { query: params.query },
-        };
-      }
-
-      default:
-        return {
-          success: false,
-          message: `Unknown action type: ${actionType}`,
-          data: { actionType },
-        };
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Execution failed";
-    console.error(`Action execution error (${actionType}):`, message);
-    return {
-      success: false,
-      message: `Failed: ${message}`,
-      data: { error: message },
-    };
-  }
-}
-
 function renderPage(title: string, message: string): string {
-  const emoji = title === "Confirmed" ? "✅" : title === "Skipped" ? "⏭️" : "⚠️";
+  const emoji =
+    title === "Confirmed"
+      ? "✅"
+      : title === "Skipped"
+        ? "⏭️"
+        : title === "Already Handled"
+          ? "ℹ️"
+          : "⚠️";
   return `<!DOCTYPE html>
 <html>
 <head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Anticipy — ${title}</title></head>

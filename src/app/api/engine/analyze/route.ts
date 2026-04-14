@@ -20,9 +20,36 @@ export async function POST(req: Request) {
       );
     }
 
-    const localTime = new Date().toLocaleString("en-US", {
-      timeZone: timezone,
-    });
+    // Verify session exists and is not already ended — prevents notification spam
+    // from arbitrary UUIDs sent by unauthenticated callers.
+    const { data: session } = await supabaseAdmin
+      .from("anticipy_sessions")
+      .select("id, status")
+      .eq("id", sessionId)
+      .single();
+
+    if (!session) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 }
+      );
+    }
+    if (session.status === "ended") {
+      return NextResponse.json(
+        { error: "Session already ended" },
+        { status: 409 }
+      );
+    }
+
+    // Resolve local time — guard against invalid timezone strings from client
+    let localTime: string;
+    try {
+      localTime = new Date().toLocaleString("en-US", { timeZone: timezone });
+    } catch {
+      localTime = new Date().toLocaleString("en-US", {
+        timeZone: "America/New_York",
+      });
+    }
 
     // Get recent actions from this session
     const { data: recentIntents } = await supabaseAdmin
@@ -36,7 +63,7 @@ export async function POST(req: Request) {
       (i) => i.summary_for_user
     );
 
-    // Build the prompt and call Groq
+    // Build the prompt
     const { system, user } = buildIntentPrompt(
       transcript,
       localTime,
@@ -44,7 +71,6 @@ export async function POST(req: Request) {
       recentActions
     );
 
-    // Kimi K2.5 primary, Groq fallback
     const llmMessages = [
       { role: "system" as const, content: system },
       { role: "user" as const, content: user },
@@ -56,28 +82,43 @@ export async function POST(req: Request) {
     try {
       response = await callKimi(llmMessages, {
         response_format: { type: "json_object" },
+        temperature: 0.1, // Low temperature for reliable structured JSON output
       });
-      // Validate response is non-empty and valid JSON
       if (!response || response.trim().length === 0) {
         throw new Error("Kimi returned empty response");
       }
-      JSON.parse(response); // test parse
+      JSON.parse(response); // Validate JSON; throws → falls through to Groq
     } catch (kimiErr) {
       console.warn("Kimi failed, falling back to Groq:", kimiErr);
       usedModel = "groq";
-      response = await callGroq(llmMessages, {
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-      });
+      try {
+        response = await callGroq(llmMessages, {
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+        });
+      } catch (groqErr) {
+        console.error("Groq fallback also failed:", groqErr);
+        // Both models failed — mark session ended and return empty intents
+        await supabaseAdmin
+          .from("anticipy_sessions")
+          .update({ status: "ended" })
+          .eq("id", sessionId);
+        return NextResponse.json({ intents: [], totalInferred: 0, totalValid: 0 });
+      }
     }
 
-    console.log(`Intent analysis completed via ${usedModel}, response length: ${response.length}`);
+    console.log(
+      `Intent analysis completed via ${usedModel}, response length: ${response.length}`
+    );
 
     let parsed: { intents: Array<Record<string, unknown>> };
     try {
       parsed = JSON.parse(response);
     } catch {
-      console.error("Failed to parse LLM response:", response?.substring(0, 200));
+      console.error(
+        "Failed to parse LLM response:",
+        response?.substring(0, 200)
+      );
       parsed = { intents: [] };
     }
 
@@ -88,7 +129,7 @@ export async function POST(req: Request) {
       (i) => typeof i.confidence === "number" && i.confidence >= 0.7
     );
 
-    // Store intents in Supabase
+    // Store intents in Supabase and dispatch notifications
     const storedIntents = [];
     for (const intent of validIntents) {
       const { data, error } = await supabaseAdmin
@@ -128,13 +169,17 @@ export async function POST(req: Request) {
           : "http://localhost:3000");
 
       // Email for ALL importance levels
-      const emailResult = await sendIntentEmail(notifyEmail, {
-        intentId: data.id,
-        summary: intent.summary_for_user as string,
-        evidenceQuote: intent.evidence_quote as string,
-        importance,
-        actionType: intent.action_type as string,
-      }, baseUrl);
+      const emailResult = await sendIntentEmail(
+        notifyEmail,
+        {
+          intentId: data.id,
+          summary: intent.summary_for_user as string,
+          evidenceQuote: intent.evidence_quote as string,
+          importance,
+          actionType: intent.action_type as string,
+        },
+        baseUrl
+      );
 
       if (emailResult) {
         await supabaseAdmin.from("anticipy_notifications").insert({
@@ -157,7 +202,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Update session status
+    // Mark session as ended
     await supabaseAdmin
       .from("anticipy_sessions")
       .update({ status: "ended" })
@@ -170,7 +215,9 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("Analyze error:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Analysis failed. Please try again." },
+      { status: 500 }
+    );
   }
 }
