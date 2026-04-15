@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Anticipy",
-  "version": "0.1.0",
-  "description": "Ambient AI that listens and acts — Chrome companion for anticipy.ai",
+  "version": "2.0.0",
+  "description": "Ambient AI wearable companion — listens, detects intents, and acts in your real browser with your real logins.",
   "permissions": [
     "activeTab",
+    "tabs",
     "storage",
     "scripting",
     "notifications",
@@ -14,7 +15,9 @@
     "https://anticipy.ai/*",
     "https://www.anticipy.ai/*",
     "https://*.supabase.co/*",
-    "http://localhost/*"
+    "https://api.groq.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js",
@@ -39,5 +42,11 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

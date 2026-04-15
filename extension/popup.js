@@ -1,55 +1,121 @@
 // Anticipy Chrome Extension — Popup Script
 
+const AUTH_ENDPOINT = "https://www.anticipy.ai/api/extension/auth";
+
 document.addEventListener("DOMContentLoaded", () => {
-  const statusDot = document.getElementById("statusDot");
-  const statusText = document.getElementById("statusText");
+  const statusDot      = document.getElementById("statusDot");
+  const statusText     = document.getElementById("statusText");
+  const reconnectBtn   = document.getElementById("reconnectBtn");
+  const authPanel      = document.getElementById("authPanel");
+  const signedInBanner = document.getElementById("signedInBanner");
+  const signOutBtn     = document.getElementById("signOutBtn");
+  const agentBanner    = document.getElementById("agentBanner");
+  const agentDot       = document.getElementById("agentDot");
+  const agentLabel     = document.getElementById("agentLabel");
+  const agentMsg       = document.getElementById("agentMsg");
   const actionsContainer = document.getElementById("actionsContainer");
-  const emptyState = document.getElementById("emptyState");
-  const openEngine = document.getElementById("openEngine");
-  const reconnectBtn = document.getElementById("reconnectBtn");
+  const emptyState     = document.getElementById("emptyState");
+  const openEngine     = document.getElementById("openEngine");
+  const accessCodeInput = document.getElementById("accessCode");
+  const signInBtn      = document.getElementById("signInBtn");
+  const authError      = document.getElementById("authError");
 
-  // Get live status from background service worker
+  // ─── Boot ─────────────────────────────────────────────────────────────────
+
+  chrome.storage.local.get(
+    ["connectionStatus", "lastActions", "apiConfig", "agentStatus"],
+    (data) => {
+      const authenticated = !!(data.apiConfig?.groqApiKey || data.apiConfig?.geminiApiKey);
+      setAuthState(authenticated);
+
+      if (data.connectionStatus) updateStatus(data.connectionStatus === "connected");
+      if (data.lastActions?.length) renderActions(data.lastActions);
+      if (data.agentStatus) renderAgentStatus(data.agentStatus);
+    }
+  );
+
+  // Also fetch live status from background
   chrome.runtime.sendMessage({ type: "GET_STATUS" }, (response) => {
-    if (chrome.runtime.lastError) {
-      updateStatus(false);
-      return;
+    if (chrome.runtime.lastError || !response) return;
+    updateStatus(response.connected);
+    if (response.lastActions?.length) renderActions(response.lastActions);
+  });
+
+  // ─── Auth ──────────────────────────────────────────────────────────────────
+
+  function setAuthState(authenticated) {
+    if (authenticated) {
+      authPanel.style.display = "none";
+      signedInBanner.classList.add("show");
+    } else {
+      authPanel.style.display = "block";
+      signedInBanner.classList.remove("show");
     }
-    if (response) {
-      updateStatus(response.connected);
-      if (response.lastActions && response.lastActions.length > 0) {
-        renderActions(response.lastActions);
+  }
+
+  signInBtn.addEventListener("click", async () => {
+    const code = accessCodeInput.value.trim();
+    if (!code) { showAuthError("Enter your access code."); return; }
+
+    signInBtn.disabled = true;
+    signInBtn.textContent = "Signing in…";
+    hideAuthError();
+
+    try {
+      const resp = await fetch(AUTH_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+
+      if (!resp.ok) {
+        showAuthError(data.error || `Error ${resp.status}`);
+        return;
       }
+
+      if (!data.groqApiKey && !data.geminiApiKey) {
+        showAuthError("Server returned no API keys. Contact support.");
+        return;
+      }
+
+      await chrome.storage.local.set({
+        apiConfig: {
+          groqApiKey: data.groqApiKey || null,
+          geminiApiKey: data.geminiApiKey || null
+        }
+      });
+
+      setAuthState(true);
+    } catch (e) {
+      showAuthError("Could not reach anticipy.ai. Check your connection.");
+    } finally {
+      signInBtn.disabled = false;
+      signInBtn.textContent = "Sign in";
     }
   });
 
-  // Also check persisted state as backup
-  chrome.storage.local.get(["connectionStatus", "lastActions"], (data) => {
-    if (data.connectionStatus) {
-      updateStatus(data.connectionStatus === "connected");
-    }
-    if (data.lastActions && data.lastActions.length > 0) {
-      renderActions(data.lastActions);
-    }
+  // Allow Enter key in the access code field
+  accessCodeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") signInBtn.click();
   });
 
-  openEngine.addEventListener("click", () => {
-    chrome.tabs.create({ url: "https://www.anticipy.ai/engine" });
-    window.close();
+  signOutBtn.addEventListener("click", async () => {
+    await chrome.storage.local.remove(["apiConfig", "agentStatus"]);
+    setAuthState(false);
+    agentBanner.classList.remove("show");
   });
 
-  reconnectBtn.addEventListener("click", () => {
-    reconnectBtn.textContent = "Reconnecting...";
-    chrome.runtime.sendMessage({ type: "RECONNECT" }, () => {
-      setTimeout(() => {
-        chrome.runtime.sendMessage({ type: "GET_STATUS" }, (response) => {
-          if (response) {
-            updateStatus(response.connected);
-            reconnectBtn.textContent = "Reconnect";
-          }
-        });
-      }, 2000);
-    });
-  });
+  function showAuthError(msg) {
+    authError.textContent = msg;
+    authError.classList.add("show");
+  }
+  function hideAuthError() {
+    authError.classList.remove("show");
+  }
+
+  // ─── Connection status ────────────────────────────────────────────────────
 
   function updateStatus(isConnected) {
     statusDot.className = "status-dot" + (isConnected ? " connected" : "");
@@ -57,17 +123,43 @@ document.addEventListener("DOMContentLoaded", () => {
     reconnectBtn.className = "reconnect-btn" + (isConnected ? "" : " show");
   }
 
+  reconnectBtn.addEventListener("click", () => {
+    reconnectBtn.textContent = "Reconnecting…";
+    chrome.runtime.sendMessage({ type: "RECONNECT" }, () => {
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ type: "GET_STATUS" }, (response) => {
+          if (response) updateStatus(response.connected);
+          reconnectBtn.textContent = "Reconnect";
+        });
+      }, 2000);
+    });
+  });
+
+  // ─── Agent status banner ──────────────────────────────────────────────────
+
+  function renderAgentStatus(agentStatus) {
+    if (!agentStatus) { agentBanner.classList.remove("show"); return; }
+
+    const { status, message } = agentStatus;
+    agentBanner.className = `show ${status}`; // add status class for color
+    agentBanner.classList.add("show");
+    agentDot.className = `agent-dot ${status}`;
+    agentLabel.textContent = status === "running" ? "Agent running" : status === "done" ? "Agent done" : "Agent failed";
+    agentMsg.textContent = message || "—";
+  }
+
+  // ─── Actions list ─────────────────────────────────────────────────────────
+
   function renderActions(actions) {
     emptyState.style.display = "none";
     actionsContainer.innerHTML = "";
 
-    // Header with clear button
     const header = document.createElement("div");
     header.className = "actions-header";
 
     const label = document.createElement("div");
     label.className = "actions-label";
-    label.textContent = `Recent Actions (${actions.length})`;
+    label.textContent = `Recent (${actions.length})`;
 
     const clearBtn = document.createElement("button");
     clearBtn.className = "clear-btn";
@@ -75,8 +167,8 @@ document.addEventListener("DOMContentLoaded", () => {
     clearBtn.addEventListener("click", () => {
       chrome.runtime.sendMessage({ type: "CLEAR_ACTIONS" }, () => {
         actionsContainer.innerHTML = "";
-        emptyState.style.display = "block";
         actionsContainer.appendChild(emptyState);
+        emptyState.style.display = "block";
       });
     });
 
@@ -88,7 +180,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const item = document.createElement("div");
       item.className = "action-item";
 
-      // Top row: badge + confidence
       const top = document.createElement("div");
       top.className = "action-top";
 
@@ -96,33 +187,29 @@ document.addEventListener("DOMContentLoaded", () => {
       badge.className = `action-badge badge-${action.importance || "standard"}`;
       badge.textContent = action.importance || "standard";
 
-      const confidence = document.createElement("span");
-      confidence.className = "action-confidence";
-      confidence.textContent = action.confidence
-        ? `${Math.round(action.confidence * 100)}%`
-        : "";
+      const conf = document.createElement("span");
+      conf.className = "action-confidence";
+      conf.textContent = action.confidence ? `${Math.round(action.confidence * 100)}%` : "";
 
       top.appendChild(badge);
-      top.appendChild(confidence);
+      top.appendChild(conf);
 
-      // Summary
       const summary = document.createElement("div");
       summary.className = "action-summary";
       summary.textContent = action.summary;
 
-      // Meta row: action type + time
       const meta = document.createElement("div");
       meta.className = "action-meta";
 
-      const actionType = document.createElement("span");
-      actionType.className = "action-type";
-      actionType.textContent = formatActionType(action.action_type);
+      const type = document.createElement("span");
+      type.className = "action-type";
+      type.textContent = (action.action_type || "").replace(/_/g, " ");
 
       const time = document.createElement("span");
       time.className = "action-time";
-      time.textContent = formatTime(action.timestamp);
+      time.textContent = relativeTime(action.timestamp);
 
-      meta.appendChild(actionType);
+      meta.appendChild(type);
       meta.appendChild(time);
 
       item.appendChild(top);
@@ -132,22 +219,30 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function formatActionType(type) {
-    if (!type) return "";
-    return type.replace(/_/g, " ");
-  }
-
-  function formatTime(isoString) {
+  function relativeTime(isoString) {
     if (!isoString) return "";
-    const d = new Date(isoString);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffMin = Math.floor(diffMs / 60000);
-
-    if (diffMin < 1) return "Just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return d.toLocaleDateString();
+    const diff = Date.now() - new Date(isoString).getTime();
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return "Just now";
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    return new Date(isoString).toLocaleDateString();
   }
+
+  // ─── Footer ───────────────────────────────────────────────────────────────
+
+  openEngine.addEventListener("click", () => {
+    chrome.tabs.create({ url: "https://www.anticipy.ai/engine" });
+    window.close();
+  });
+
+  // ─── Poll agent status every 2s while popup is open ───────────────────────
+  const statusPoll = setInterval(() => {
+    chrome.storage.local.get("agentStatus", ({ agentStatus }) => {
+      renderAgentStatus(agentStatus || null);
+    });
+  }, 2000);
+
+  window.addEventListener("unload", () => clearInterval(statusPoll));
 });
