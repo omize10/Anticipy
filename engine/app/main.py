@@ -10,6 +10,7 @@ import json
 import logging
 import signal
 import time
+import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 
@@ -22,9 +23,11 @@ from app import messages as msg
 from app.router import classify, handle_chat, handle_question
 from app.agent import execute_task
 from app.models import CostTracker
+from app.planner import plan_task
 from app.safety import check_blocked, sanitize_input
 from app.config import (
     MAX_INPUT_LENGTH,
+    MAX_SECONDS,
     MAX_TASKS_PER_HOUR,
     MAX_TASKS_PER_DAY,
     REQUIRED_ENV_VARS,
@@ -269,6 +272,160 @@ async def stats(token: str):
         "total_errors": _total_errors,
         "models_configured": len(MODEL_CHAIN),
         "model_names": [m["name"] for m in MODEL_CHAIN],
+    }
+
+
+# --- Intent execution endpoint ---
+# Called by Next.js backend when a user confirms an action.
+# Runs the browser agent and returns the result (blocking up to MAX_SECONDS).
+
+class ExecuteIntentRequest(BaseModel):
+    task: str
+    intent_id: str | None = None
+    user_id: str | None = None
+
+
+@app.post("/execute-intent")
+async def execute_intent_endpoint(req: ExecuteIntentRequest):
+    """
+    Execute a browser automation task from a structured intent description.
+
+    Starts the browser agent as a background asyncio task so the browser
+    keeps running even if the HTTP client disconnects early.  Waits up to
+    25 s for a result before returning a "working" response; the background
+    task writes the final outcome to engine_tasks in Supabase either way.
+    """
+    if not req.task or not req.task.strip():
+        raise HTTPException(status_code=400, detail="task is required")
+
+    task_text = sanitize_input(req.task.strip())
+    if not task_text:
+        raise HTTPException(status_code=400, detail="task text is empty after sanitization")
+
+    if check_blocked(task_text):
+        return {
+            "success": False,
+            "message": "This action is not permitted.",
+            "data": {},
+            "plan": "",
+        }
+
+    task_id = str(uuid.uuid4())
+    messages_log: list[dict] = []
+    plan_text: str = ""
+
+    # --- Generate a quick plan so we can return something useful ---
+    try:
+        tracker = CostTracker()
+        plan = await asyncio.wait_for(plan_task(task_text, tracker), timeout=8)
+        sub_goals = plan.get("sub_goals", [])
+        if sub_goals:
+            plan_text = " → ".join(str(g) for g in sub_goals[:3])
+    except Exception:
+        pass  # Plan is optional; proceed without it
+
+    # --- Result container shared between background task and waiter ---
+    result_holder: list[dict] = []  # holds at most one result dict
+
+    async def collect(msg_dict: dict) -> None:
+        messages_log.append(msg_dict)
+
+    async def receive_confirmation() -> str:
+        return "confirmed"  # Auto-confirm for API-driven executions
+
+    async def run_and_store() -> None:
+        """Run the browser agent and persist the result to Supabase."""
+        try:
+            await execute_task(
+                goal=task_text,
+                send=collect,
+                receive_confirmation=receive_confirmation,
+                user_id=req.user_id,
+            )
+        except Exception:
+            logger.exception("execute_intent background task error")
+
+        # Derive final result from collected messages
+        final: dict = {"success": False, "message": "No result returned from agent.", "data": {}}
+        for m in reversed(messages_log):
+            m_type = m.get("type")
+            if m_type == "complete":
+                final = {"success": True, "message": m.get("message", "Done."), "data": {}}
+                break
+            if m_type == "error":
+                final = {"success": False, "message": m.get("message", "Task failed."), "data": {}}
+                break
+
+        result_holder.append(final)
+
+        # Persist to engine_tasks
+        try:
+            await supabase_client.insert_row(
+                "engine_tasks",
+                {
+                    "id": task_id,
+                    "user_id": req.user_id,
+                    "goal": task_text,
+                    "status": "completed" if final["success"] else "failed",
+                    "result": final["message"],
+                    "metadata": {
+                        "intent_id": req.intent_id,
+                        "plan": plan_text,
+                        "log_count": len(messages_log),
+                    },
+                },
+            )
+        except Exception:
+            pass  # Non-critical
+
+        # Update anticipy_actions if intent_id provided
+        if req.intent_id:
+            try:
+                await supabase_client.insert_row(
+                    "anticipy_actions",
+                    {
+                        "intent_id": req.intent_id,
+                        "status": "success" if final["success"] else "failed",
+                        "result": {"message": final["message"], "task_id": task_id},
+                        "external_id": task_id,
+                    },
+                )
+            except Exception:
+                pass  # anticipy_actions may not exist in engine db — Next.js handles it too
+
+    # Start the browser task in background (survives HTTP disconnect)
+    bg_task = asyncio.create_task(run_and_store())
+
+    # Wait up to 25 s for an early result
+    try:
+        await asyncio.wait_for(asyncio.shield(bg_task), timeout=25)
+    except asyncio.TimeoutError:
+        # Task is still running; return a "working" response so Next.js
+        # can show the user "Working on it…" without blocking the HTTP response.
+        return {
+            "success": True,
+            "working": True,
+            "message": "Working on it — this may take a minute.",
+            "data": {"task_id": task_id},
+            "plan": plan_text,
+        }
+    except Exception:
+        pass  # Will be captured in result_holder
+
+    if result_holder:
+        r = result_holder[0]
+        return {
+            "success": r["success"],
+            "message": r["message"],
+            "data": {**r.get("data", {}), "task_id": task_id},
+            "plan": plan_text,
+        }
+
+    return {
+        "success": False,
+        "message": "Agent finished without a clear result.",
+        "data": {"task_id": task_id},
+        "plan": plan_text,
     }
 
 

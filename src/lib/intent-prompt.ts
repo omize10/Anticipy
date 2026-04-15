@@ -80,10 +80,13 @@ The "reasoning" value is your private analysis — think aloud about who is spea
 Common parameter schemas (extend or adapt for novel action types):
 - calendar_add: { "title": string, "start_iso": string, "end_iso": string, "attendees": string[], "location": string, "description": string }
 - reminder_add: { "text": string, "due_iso": string }
-- email_draft: { "recipient_name": string, "subject": string, "body": string }
-- message_draft: { "recipient_name": string, "channel": "sms"|"email"|"slack"|"whatsapp", "body": string }
+- email_draft: { "recipient_name": string, "recipient_email": string (extract if mentioned in transcript, e.g. "hello@example.com"), "subject": string, "body": string }
+- message_draft: { "recipient_name": string, "recipient_phone": string (extract if mentioned, e.g. "+16045551234"), "channel": "sms"|"email"|"slack"|"whatsapp", "body": string }
 - note_add: { "title": string, "body": string }
 - lookup: { "query": string, "why_useful": string }
+- book_flight: { "from": string, "to": string, "date": string, "return_date": string, "passengers": number, "cabin_class": string }
+- make_reservation: { "venue": string, "date": string, "time": string, "party_size": number, "notes": string }
+- order_gift / send_flowers: { "recipient_name": string, "item": string, "occasion": string, "budget": string, "delivery_address": string, "message": string }
 - For any other action_type: use whatever keys make the action executable and self-explanatory.
 
 If nothing actionable: { "reasoning": "...", "intents": [] }`;
