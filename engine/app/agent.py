@@ -7,9 +7,11 @@ Receives a goal, drives the browser step-by-step, and streams status via callbac
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import logging
 import os
+import subprocess
 import time
 from typing import Callable, Awaitable
 from urllib.parse import urlparse
@@ -351,8 +353,29 @@ class EngineAgent:
             if self.user_id and domain:
                 cookies = await _load_cookies(self.user_id, domain)
 
-            # Start session and inject cookies before agent runs
-            await self._session.start()
+            # Kill stale browser processes and clean up lock files before starting
+            def _cleanup_stale_browser():
+                subprocess.run(["pkill", "-f", "chromium"], capture_output=True)
+                subprocess.run(["pkill", "-f", "patchright"], capture_output=True)
+                for lock_file in glob.glob("/tmp/patchright*/**/SingletonLock", recursive=True):
+                    try:
+                        os.remove(lock_file)
+                    except OSError:
+                        pass
+
+            # Start session with retry (stale processes can cause 30s timeout)
+            for attempt in range(2):
+                try:
+                    await self._session.start()
+                    break
+                except Exception as start_exc:
+                    if attempt == 0:
+                        logger.warning("Browser start failed (attempt 1), cleaning up and retrying: %s", start_exc)
+                        _cleanup_stale_browser()
+                        await asyncio.sleep(2)
+                    else:
+                        raise
+
             if cookies and self._session._browser_context:
                 try:
                     await self._session._browser_context.add_cookies(cookies)

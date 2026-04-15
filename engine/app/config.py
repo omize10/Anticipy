@@ -7,6 +7,14 @@ import os
 
 from cryptography.fernet import Fernet
 
+# Increase browser_use event timeouts before the module is imported.
+# The defaults (30s each) cause startup failures when stale Chrome processes
+# are present.  These env vars are read by browser_use at import time via
+# Field(default_factory=lambda: _get_timeout(...)).
+os.environ.setdefault("TIMEOUT_BrowserLaunchEvent", "60")
+os.environ.setdefault("TIMEOUT_BrowserStartEvent", "60")
+os.environ.setdefault("TIMEOUT_BrowserConnectedEvent", "60")
+
 
 # --- Supabase ---
 SUPABASE_URL: str = os.environ.get(
