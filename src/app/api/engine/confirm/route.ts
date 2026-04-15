@@ -17,22 +17,38 @@ export async function GET(req: Request) {
 
   const newStatus = action === "yes" ? "confirmed" : "rejected";
 
-  // Guard: only update intents that are still pending to prevent double-execution
-  // (user could click email link AND reply to SMS, or click the link twice).
-  const { data: currentIntent } = await supabaseAdmin
+  // Atomic guard: update only if status is still "pending" and return the updated row.
+  // This single round-trip eliminates the SELECT→check→UPDATE TOCTOU race and also
+  // avoids stale-read false positives from PgBouncer connection pooling.
+  const { data: updated, error } = await supabaseAdmin
     .from("anticipy_intents")
-    .select("status")
+    .update({ status: newStatus })
     .eq("id", intentId)
-    .single();
+    .eq("status", "pending")
+    .select("id");
 
-  if (!currentIntent) {
-    return new Response(renderPage("Error", "Intent not found."), {
+  if (error) {
+    return new Response(renderPage("Error", error.message), {
       headers: { "Content-Type": "text/html" },
-      status: 404,
+      status: 500,
     });
   }
 
-  if (currentIntent.status !== "pending") {
+  // Zero rows updated means either the intent doesn't exist or was already handled.
+  if (!updated || updated.length === 0) {
+    const { data: existingIntent } = await supabaseAdmin
+      .from("anticipy_intents")
+      .select("id")
+      .eq("id", intentId)
+      .single();
+
+    if (!existingIntent) {
+      return new Response(renderPage("Error", "Intent not found."), {
+        headers: { "Content-Type": "text/html" },
+        status: 404,
+      });
+    }
+
     return new Response(
       renderPage(
         "Already Handled",
@@ -40,19 +56,6 @@ export async function GET(req: Request) {
       ),
       { headers: { "Content-Type": "text/html" } }
     );
-  }
-
-  const { error } = await supabaseAdmin
-    .from("anticipy_intents")
-    .update({ status: newStatus })
-    .eq("id", intentId)
-    .eq("status", "pending"); // Double-guard against TOCTOU race
-
-  if (error) {
-    return new Response(renderPage("Error", error.message), {
-      headers: { "Content-Type": "text/html" },
-      status: 500,
-    });
   }
 
   let executionMessage = "";
