@@ -6,6 +6,16 @@ export const metadata = {
     "Step-by-step guide to install the Anticipy Chrome extension and connect it to your account.",
 };
 
+const codeStyle: React.CSSProperties = {
+  padding: "2px 6px",
+  background: "rgba(255,255,255,0.07)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: 5,
+  fontFamily: "monospace",
+  fontSize: 13,
+  color: "var(--text-on-dark)",
+};
+
 const steps = [
   {
     n: 1,
@@ -147,16 +157,6 @@ const steps = [
     ),
   },
 ];
-
-const codeStyle: React.CSSProperties = {
-  padding: "2px 6px",
-  background: "rgba(255,255,255,0.07)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: 5,
-  fontFamily: "monospace",
-  fontSize: 13,
-  color: "var(--text-on-dark)",
-};
 
 export default function ExtensionInstallPage() {
   return (

@@ -15,7 +15,7 @@ import { createCalendarEvent } from "./google-calendar";
 import { Resend } from "resend";
 import { sendSMS } from "./twilio-notify";
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
+const resend = new Resend(process.env.RESEND_API_KEY ?? "re_placeholder");
 
 export interface ActionResult {
   success: boolean;
