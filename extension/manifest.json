@@ -13,7 +13,8 @@
   "host_permissions": [
     "https://anticipy.ai/*",
     "https://www.anticipy.ai/*",
-    "https://*.supabase.co/*"
+    "https://*.supabase.co/*",
+    "http://localhost/*"
   ],
   "background": {
     "service_worker": "background.js",

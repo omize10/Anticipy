@@ -17,13 +17,6 @@ import { sendSMS } from "./twilio-notify";
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-// Engine URL for server-side calls (not exposed to browser)
-// Use ENGINE_INTERNAL_URL for private VPC routing, fall back to public URL
-const ENGINE_URL =
-  process.env.ENGINE_INTERNAL_URL ||
-  process.env.NEXT_PUBLIC_ENGINE_URL ||
-  "http://localhost:8000";
-
 export interface ActionResult {
   success: boolean;
   message: string;
@@ -220,86 +213,35 @@ export function buildBrowserTask(
 
 // ---------------------------------------------------------------------------
 // Browser agent router
-// Calls the Python engine's /execute-intent endpoint.
-// Falls back to saving a Supabase note if the engine is unreachable.
+// Routes execution to the Chrome extension, which calls the local engine.
+// The extension listens for status="confirmed" via Supabase Realtime, then
+// calls localhost:8000/execute-intent on the user's device — bypassing the
+// Vercel→localhost connectivity problem entirely.
 // ---------------------------------------------------------------------------
 
 async function routeToBrowserAgent(
   intent: Record<string, unknown>,
   taskDescription: string
 ): Promise<ActionResult> {
+  // Store the built task description in the intent parameters so the extension
+  // can pick it up without having to reconstruct it from action_type + parameters.
   try {
-    const response = await fetch(`${ENGINE_URL}/execute-intent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task: taskDescription,
-        intent_id: intent.id,
-        user_id: intent.user_id,
-      }),
-      // Allow up to 35 s — the engine times out at 25 s and returns "working"
-      signal: AbortSignal.timeout(35_000),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      throw new Error(`Engine returned ${response.status}: ${errText}`);
-    }
-
-    const result = await response.json();
-
-    // "working" = engine started the task but it's still running in background
-    if (result.working) {
-      return {
-        success: true,
-        message:
-          result.plan
-            ? `Working on it — ${result.plan}`
-            : "Working on it — this may take a minute.",
-        data: {
-          working: true,
-          task_id: result.data?.task_id,
-          plan: result.plan,
-          executedVia: "browser_agent",
-        },
-      };
-    }
-
-    return {
-      success: result.success ?? false,
-      message: result.message || "Task completed.",
-      data: {
-        ...(result.data || {}),
-        plan: result.plan,
-        executedVia: "browser_agent",
-      },
-    };
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`[executeAction] Browser agent unreachable: ${errMsg}`);
-
-    // Fallback: persist as a queued note so nothing is silently lost
-    try {
-      const label = String(intent.action_type || "action").replace(/_/g, " ");
-      await supabaseAdmin.from("anticipy_notes").insert({
-        session_id: intent.session_id,
-        title: `Queued: ${label}`,
-        body: taskDescription,
-      });
-      return {
-        success: true,
-        message: `Saved for later — the browser agent is currently unavailable. "${taskDescription.split("\n")[0]}"`,
-        data: { queued: true, engineError: errMsg },
-      };
-    } catch {
-      return {
-        success: false,
-        message:
-          "The action could not be completed. The browser agent is unavailable and the note could not be saved.",
-        data: { engineError: errMsg },
-      };
-    }
+    const existingParams = (intent.parameters as Record<string, unknown>) || {};
+    await supabaseAdmin
+      .from("anticipy_intents")
+      .update({ parameters: { ...existingParams, browser_task: taskDescription } })
+      .eq("id", intent.id as string);
+  } catch (e) {
+    // Non-fatal — extension will fall back to summary_for_user
+    console.warn("[executeAction] Could not store browser_task in parameters:", e);
   }
+
+  return {
+    success: true,
+    message:
+      "Got it — executing on your device via the Anticipy browser agent.",
+    data: { routing: "extension", task: taskDescription },
+  };
 }
 
 // ---------------------------------------------------------------------------

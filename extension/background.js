@@ -48,6 +48,7 @@ function connectRealtime() {
       console.log("Anticipy: Realtime connected");
 
       // Join the channel for postgres changes on anticipy_intents
+      // Subscribes to both INSERT (new intents) and UPDATE (confirmed intents for execution)
       joinRef++;
       const joinMsg = {
         topic: "realtime:public:anticipy_intents",
@@ -58,6 +59,11 @@ function connectRealtime() {
             postgres_changes: [
               {
                 event: "INSERT",
+                schema: "public",
+                table: "anticipy_intents"
+              },
+              {
+                event: "UPDATE",
                 schema: "public",
                 table: "anticipy_intents"
               }
@@ -79,13 +85,16 @@ function connectRealtime() {
           return;
         }
 
-        // Handle postgres_changes event (INSERT on anticipy_intents)
+        // Handle postgres_changes event (INSERT or UPDATE on anticipy_intents)
         if (msg.event === "postgres_changes") {
           const change = msg.payload;
           if (change && change.data) {
+            const eventType = change.data.type; // "INSERT" | "UPDATE" | "DELETE"
             const record = change.data.record;
-            if (record && record.summary_for_user) {
+            if (eventType === "INSERT" && record && record.summary_for_user) {
               handleNewIntent(record);
+            } else if (eventType === "UPDATE" && record && record.status === "confirmed") {
+              handleConfirmedIntent(record);
             }
           }
           return;
@@ -170,6 +179,72 @@ function handleNewIntent(intent) {
   // Update badge with action count
   chrome.action.setBadgeText({ text: String(lastActions.length) });
   chrome.action.setBadgeBackgroundColor({ color: "#C8A97E" });
+}
+
+// Called when an intent status changes to "confirmed" — the browser agent should execute it
+async function handleConfirmedIntent(intent) {
+  if (!intent || !intent.id) return;
+
+  // Dedupe: don't execute the same intent twice in the same session
+  const dedupKey = `executed_${intent.id}`;
+  const stored = await chrome.storage.local.get(dedupKey);
+  if (stored[dedupKey]) {
+    console.log("Anticipy: already executed intent", intent.id);
+    return;
+  }
+  await chrome.storage.local.set({ [dedupKey]: true });
+
+  // Use the pre-built browser task if stored, otherwise fall back to summary
+  const params = intent.parameters || {};
+  const task = params.browser_task || intent.summary_for_user || "Complete the requested task.";
+
+  console.log("Anticipy: executing confirmed intent via local engine:", intent.id, task.substring(0, 80));
+
+  try {
+    const response = await fetch("http://localhost:8000/execute-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task,
+        intent_id: intent.id,
+        user_id: intent.user_id || null
+      }),
+      signal: AbortSignal.timeout(35000)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      console.error("Anticipy: engine returned error:", response.status, errText);
+      return;
+    }
+
+    const result = await response.json();
+    console.log("Anticipy: engine result for intent", intent.id, "→", result.message || result.working);
+
+    // Show notification with result
+    chrome.notifications.create(`exec-${intent.id}`, {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: result.success || result.working ? "✅ Anticipy done" : "⚠️ Anticipy",
+      message: result.message || (result.working ? "Working on it…" : "Task finished."),
+      priority: 0
+    });
+  } catch (err) {
+    const isOffline = err?.name === "AbortError" || err?.message?.includes("Failed to fetch");
+    console.error("Anticipy: could not reach local engine:", err?.message || err);
+    // Don't show a notification for connection errors to avoid spamming when engine is off
+    if (!isOffline) {
+      chrome.notifications.create(`exec-err-${intent.id}`, {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "⚠️ Anticipy",
+        message: "Browser agent unavailable. Make sure the engine is running on port 8000.",
+        priority: 0
+      });
+    }
+    // Remove dedup key so it can be retried
+    await chrome.storage.local.remove(dedupKey);
+  }
 }
 
 function updateBadge(status) {

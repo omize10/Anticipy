@@ -70,17 +70,23 @@ export async function GET(req: Request) {
     if (intent) {
       const result = await executeAction(intent);
 
-      await supabaseAdmin
-        .from("anticipy_intents")
-        .update({ status: result.success ? "executed" : "failed" })
-        .eq("id", intentId);
+      // Extension-routed actions: keep status as "confirmed" so the Supabase
+      // Realtime UPDATE event triggers the Chrome extension on the user's device.
+      // The extension then calls localhost:8000/execute-intent directly.
+      // For all other actions (calendar, email, SMS, note), update status normally.
+      if (result.data?.routing !== "extension") {
+        await supabaseAdmin
+          .from("anticipy_intents")
+          .update({ status: result.success ? "executed" : "failed" })
+          .eq("id", intentId);
 
-      await supabaseAdmin.from("anticipy_actions").insert({
-        intent_id: intentId,
-        status: result.success ? "success" : "failed",
-        result: result.data,
-        external_id: result.externalId,
-      });
+        await supabaseAdmin.from("anticipy_actions").insert({
+          intent_id: intentId,
+          status: result.success ? "success" : "failed",
+          result: result.data,
+          external_id: result.externalId,
+        });
+      }
 
       executionMessage = result.message;
     }
