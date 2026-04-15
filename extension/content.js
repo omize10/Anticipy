@@ -187,10 +187,13 @@ function findElement(selector, text, aria) {
 function fillInput(input, value) {
   input.focus();
 
-  // Use the native setter so React's synthetic event system picks up the change
-  const nativeSetter =
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set ||
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+  // Use the correct native setter based on element type so React's synthetic
+  // event system picks up the change. Using the wrong prototype's setter
+  // (e.g. HTMLInputElement.prototype.set on a <textarea>) breaks React state.
+  const proto = input instanceof HTMLTextAreaElement
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
 
   if (nativeSetter) {
     nativeSetter.call(input, value);

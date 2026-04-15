@@ -6,6 +6,7 @@ rate limiting, input validation, graceful shutdown, and admin stats.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import signal
@@ -283,6 +284,7 @@ class ExecuteIntentRequest(BaseModel):
     task: str
     intent_id: str | None = None
     user_id: str | None = None
+    sync: bool = False  # If True, wait up to 280s for a real result (for testing/CLI use)
 
 
 @app.post("/execute-intent")
@@ -334,16 +336,48 @@ async def execute_intent_endpoint(req: ExecuteIntentRequest):
         return "confirmed"  # Auto-confirm for API-driven executions
 
     async def run_and_store() -> None:
-        """Run the browser agent and persist the result to Supabase."""
-        try:
-            await execute_task(
-                goal=task_text,
-                send=collect,
-                receive_confirmation=receive_confirmation,
-                user_id=req.user_id,
-            )
-        except Exception:
-            logger.exception("execute_intent background task error")
+        """
+        Run the browser agent and persist the result to Supabase.
+
+        browser_use's internal bubus event system conflicts with uvicorn's event
+        loop when both share the same asyncio executor — the LocalBrowserWatchdog
+        coroutine gets starved and times out after 30 s.  Running the agent in a
+        dedicated thread with its own fresh event loop sidesteps the conflict
+        while still allowing normal async code (supabase, LLM calls) to work.
+        """
+        thread_messages: list[dict] = []
+
+        def _run_in_thread() -> None:
+            import asyncio as _asyncio
+            thread_loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(thread_loop)
+
+            async def _collect(msg: dict) -> None:
+                thread_messages.append(msg)
+
+            async def _confirm() -> str:
+                return "confirmed"
+
+            try:
+                thread_loop.run_until_complete(
+                    execute_task(
+                        goal=task_text,
+                        send=_collect,
+                        receive_confirmation=_confirm,
+                        user_id=req.user_id,
+                    )
+                )
+            except Exception:
+                logger.exception("execute_intent thread task error")
+            finally:
+                thread_loop.close()
+
+        main_loop = asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            await main_loop.run_in_executor(pool, _run_in_thread)
+
+        # Merge thread messages into the shared log
+        messages_log.extend(thread_messages)
 
         # Derive final result from collected messages
         final: dict = {"success": False, "message": "No result returned from agent.", "data": {}}
@@ -396,9 +430,10 @@ async def execute_intent_endpoint(req: ExecuteIntentRequest):
     # Start the browser task in background (survives HTTP disconnect)
     bg_task = asyncio.create_task(run_and_store())
 
-    # Wait up to 25 s for an early result
+    # Wait for result: sync mode waits up to 280s; default returns quickly with "working"
+    wait_timeout = 280 if req.sync else 25
     try:
-        await asyncio.wait_for(asyncio.shield(bg_task), timeout=25)
+        await asyncio.wait_for(asyncio.shield(bg_task), timeout=wait_timeout)
     except asyncio.TimeoutError:
         # Task is still running; return a "working" response so Next.js
         # can show the user "Working on it…" without blocking the HTTP response.
@@ -539,19 +574,63 @@ async def ws_task(websocket: WebSocket):
                 _record_task(rate_user)
                 _total_tasks += 1
 
-                # Run the agent in the background
+                # Run the agent in the background, isolated in its own thread+loop
+                # to prevent browser_use's bubus watchdog from conflicting with uvicorn.
                 task_running = True
+                _ws_goal = text
+                _ws_user_id = user_id
 
                 async def run_task():
                     nonlocal task_running
                     global _total_errors
-                    try:
-                        await execute_task(
-                            goal=text,
-                            send=send_msg,
-                            receive_confirmation=receive_confirmation,
-                            user_id=user_id,
+                    main_loop = asyncio.get_running_loop()
+
+                    def _sync_send(data: dict) -> None:
+                        """Bridge: thread → main loop for WebSocket sends."""
+                        fut = asyncio.run_coroutine_threadsafe(send_msg(data), main_loop)
+                        try:
+                            fut.result(timeout=5)
+                        except Exception:
+                            pass
+
+                    def _sync_confirm() -> str:
+                        """Bridge: thread → main loop for user confirmation."""
+                        fut = asyncio.run_coroutine_threadsafe(
+                            receive_confirmation(), main_loop
                         )
+                        try:
+                            return fut.result(timeout=125)
+                        except Exception:
+                            return "timeout"
+
+                    def _run_in_thread() -> None:
+                        import asyncio as _asyncio
+                        thread_loop = _asyncio.new_event_loop()
+                        _asyncio.set_event_loop(thread_loop)
+
+                        async def _send(d: dict) -> None:
+                            _sync_send(d)
+
+                        async def _confirm() -> str:
+                            return _sync_confirm()
+
+                        try:
+                            thread_loop.run_until_complete(
+                                execute_task(
+                                    goal=_ws_goal,
+                                    send=_send,
+                                    receive_confirmation=_confirm,
+                                    user_id=_ws_user_id,
+                                )
+                            )
+                        except Exception:
+                            _sync_send({"type": "error", "message": msg.CONNECTION_ERROR})
+                        finally:
+                            thread_loop.close()
+
+                    try:
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            await main_loop.run_in_executor(pool, _run_in_thread)
                     except Exception:
                         _total_errors += 1
                         await send_msg({"type": "error", "message": msg.CONNECTION_ERROR})

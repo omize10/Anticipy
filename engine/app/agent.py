@@ -309,6 +309,15 @@ class EngineAgent:
             )
             os.makedirs(profile_dir, exist_ok=True)
 
+            # Remove stale Chrome singleton lock files left by crashed sessions.
+            # Without this, a new Chrome launch hangs indefinitely waiting for the
+            # lock to be released by a process that no longer exists.
+            for lock_file in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                try:
+                    os.remove(os.path.join(profile_dir, lock_file))
+                except FileNotFoundError:
+                    pass
+
             # Build chrome args for stealth and stability
             chrome_args = [
                 "--disable-blink-features=AutomationControlled",
@@ -330,8 +339,25 @@ class EngineAgent:
                     f"--load-extension={nopecha_dir}",
                 ])
 
+            # Headless mode: can be forced via BROWSER_HEADLESS=true env var.
+            # Headful (default) is better for anti-bot detection on real servers,
+            # but requires screen capture access (Linux: Xvfb; macOS: Screen Recording).
+            # Fall back to headless automatically when not configured for a display.
+            import sys
+            headless_env = os.environ.get("BROWSER_HEADLESS", "").lower()
+            if headless_env in ("1", "true", "yes"):
+                use_headless = True
+            elif headless_env in ("0", "false", "no"):
+                use_headless = False
+            elif sys.platform == "darwin":
+                # macOS: headful requires Screen Recording permission — default to headless
+                # unless the user explicitly opts in via BROWSER_HEADLESS=false
+                use_headless = True
+            else:
+                use_headless = False
+
             self._session = BrowserSession(
-                headless=False,
+                headless=use_headless,
                 user_data_dir=profile_dir,
                 args=chrome_args,
                 no_viewport=True,

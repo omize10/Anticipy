@@ -405,20 +405,27 @@ export class BrowserAgent {
 
   async _waitForTabLoad(tabId, timeout = 15_000) {
     return new Promise((resolve) => {
-      const deadline = setTimeout(() => {
+      let resolved = false;
+      const done = (settleMs = 800) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(deadline);
         chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }, timeout);
-
-      const listener = (id, changeInfo) => {
-        if (id === tabId && changeInfo.status === "complete") {
-          clearTimeout(deadline);
-          chrome.tabs.onUpdated.removeListener(listener);
-          setTimeout(resolve, 800); // let JS settle
-        }
+        setTimeout(resolve, settleMs);
       };
 
+      const deadline = setTimeout(() => done(0), timeout);
+
+      const listener = (id, changeInfo) => {
+        if (id === tabId && changeInfo.status === "complete") done();
+      };
+
+      // Register listener FIRST, then check current state to avoid the race
+      // where the page loads between update() and addListener()
       chrome.tabs.onUpdated.addListener(listener);
+      chrome.tabs.get(tabId, (tab) => {
+        if (tab?.status === "complete") done();
+      });
     });
   }
 
