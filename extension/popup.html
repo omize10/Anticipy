@@ -230,12 +230,16 @@
   <!-- Sign-in form (shown when not authenticated) -->
   <div id="authPanel">
     <div class="auth-title">Sign in to enable automation</div>
-    <div class="auth-subtitle">Enter your access code to connect the browser agent.</div>
+    <div class="auth-subtitle">
+      Get your access code at
+      <a href="https://www.anticipy.ai/engine" id="getCodeLink" style="color:#C8A97E;text-decoration:none;">anticipy.ai/engine</a>
+      after creating an account.
+    </div>
     <div class="field">
       <label>Access code</label>
-      <input type="password" id="accessCode" placeholder="Your access code" autocomplete="off">
+      <input type="password" id="accessCode" placeholder="Paste your access code" autocomplete="off">
     </div>
-    <button class="auth-btn" id="signInBtn">Sign in</button>
+    <button class="auth-btn" id="signInBtn">Connect</button>
     <div class="auth-error" id="authError"></div>
   </div>
 

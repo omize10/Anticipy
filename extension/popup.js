@@ -237,6 +237,16 @@ document.addEventListener("DOMContentLoaded", () => {
     window.close();
   });
 
+  // Also open engine from the "get code" link in auth panel
+  const getCodeLink = document.getElementById("getCodeLink");
+  if (getCodeLink) {
+    getCodeLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: "https://www.anticipy.ai/engine" });
+      window.close();
+    });
+  }
+
   // ─── Poll agent status every 2s while popup is open ───────────────────────
   const statusPoll = setInterval(() => {
     chrome.storage.local.get("agentStatus", ({ agentStatus }) => {
