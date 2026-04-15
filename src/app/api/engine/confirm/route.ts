@@ -17,22 +17,33 @@ export async function GET(req: Request) {
 
   const newStatus = action === "yes" ? "confirmed" : "rejected";
 
-  // Guard: only update intents that are still pending to prevent double-execution
-  // (user could click email link AND reply to SMS, or click the link twice).
-  const { data: currentIntent } = await supabaseAdmin
+  // Atomic guard: atomically transition status from "pending" to the new status.
+  // If 0 rows are returned, the intent was already handled (or doesn't exist).
+  // This prevents double-execution even under concurrent requests (two email link
+  // clicks, one email + one SMS reply, etc.) because Postgres UPDATE is atomic.
+  const { data: claimedIntent, error: claimError } = await supabaseAdmin
     .from("anticipy_intents")
-    .select("status")
+    .update({ status: newStatus })
     .eq("id", intentId)
+    .eq("status", "pending")
+    .select("*")
     .single();
 
-  if (!currentIntent) {
-    return new Response(renderPage("Error", "Intent not found."), {
-      headers: { "Content-Type": "text/html" },
-      status: 404,
-    });
-  }
+  if (claimError || !claimedIntent) {
+    // 0 rows updated — check whether the intent exists at all
+    const { data: existing } = await supabaseAdmin
+      .from("anticipy_intents")
+      .select("id")
+      .eq("id", intentId)
+      .single();
 
-  if (currentIntent.status !== "pending") {
+    if (!existing) {
+      return new Response(renderPage("Error", "Intent not found."), {
+        headers: { "Content-Type": "text/html" },
+        status: 404,
+      });
+    }
+
     return new Response(
       renderPage(
         "Already Handled",
@@ -42,45 +53,24 @@ export async function GET(req: Request) {
     );
   }
 
-  const { error } = await supabaseAdmin
-    .from("anticipy_intents")
-    .update({ status: newStatus })
-    .eq("id", intentId)
-    .eq("status", "pending"); // Double-guard against TOCTOU race
-
-  if (error) {
-    return new Response(renderPage("Error", error.message), {
-      headers: { "Content-Type": "text/html" },
-      status: 500,
-    });
-  }
-
   let executionMessage = "";
 
   if (newStatus === "confirmed") {
-    const { data: intent } = await supabaseAdmin
+    const result = await executeAction(claimedIntent);
+
+    await supabaseAdmin
       .from("anticipy_intents")
-      .select("*")
-      .eq("id", intentId)
-      .single();
+      .update({ status: result.success ? "executed" : "failed" })
+      .eq("id", intentId);
 
-    if (intent) {
-      const result = await executeAction(intent);
+    await supabaseAdmin.from("anticipy_actions").insert({
+      intent_id: intentId,
+      status: result.success ? "success" : "failed",
+      result: result.data,
+      external_id: result.externalId,
+    });
 
-      await supabaseAdmin
-        .from("anticipy_intents")
-        .update({ status: result.success ? "executed" : "failed" })
-        .eq("id", intentId);
-
-      await supabaseAdmin.from("anticipy_actions").insert({
-        intent_id: intentId,
-        status: result.success ? "success" : "failed",
-        result: result.data,
-        external_id: result.externalId,
-      });
-
-      executionMessage = result.message;
-    }
+    executionMessage = result.message;
   }
 
   const mainMessage =
