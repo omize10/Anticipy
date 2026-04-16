@@ -54,14 +54,14 @@ const DOCS: DocItem[] = [
     title: "3D Case Design",
     description: "OpenSCAD parametric case, 38×25×11mm. Print at JLCPCB 3D or Shapeways/Xometry for titanium premium.",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/case/anticipy_pendant.scad",
+    href: "https://raw.githubusercontent.com/omize10/Anticipy/main/firmware/case/anticipy_pendant.scad",
     external: true,
   },
   {
     title: "3D Product Render",
     description: "Interactive 3D render for presentations and investor decks",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/case/render_product.html",
+    href: "/internal/render",
     external: true,
   },
   {
