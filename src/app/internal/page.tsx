@@ -10,129 +10,178 @@ interface DocItem {
   category: Exclude<Category, "All">;
   href: string;
   external?: boolean;
+  badge?: string;
 }
 
 const DOCS: DocItem[] = [
-  // Hardware
+  // Hardware docs — now internal pages
   {
     title: "Firmware Design Doc",
-    description: "Complete hardware spec: ESP32-S3, INMP441, 400mAh LiPo, USB-C",
+    description: "Complete hardware spec: ESP32-S3, block diagram, pin assignments, state machine, audio pipeline, API contract",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/DESIGN.md",
+    href: "/internal/docs/hardware",
+    badge: "Full spec",
   },
   {
     title: "PCB Schematic",
-    description: "Pin mapping for all component connections",
+    description: "Full pin mapping: U1 (XIAO), MIC1 (INMP441), LED1 (SK6812), U2 (TP4056), all passives, net summary, design notes",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/pcb/SCHEMATIC.md",
+    href: "/internal/docs/schematic",
+    badge: "All components",
   },
   {
     title: "PCB Assembly Guide",
-    description: "Step-by-step manufacturing instructions",
+    description: "Step-by-step hand-solder instructions, pre-battery continuity checks, power-on test sequence, QA checklist",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/pcb/ASSEMBLY.md",
-  },
-  {
-    title: "KiCad Project Files",
-    description: "KiCad schematic and project files",
-    category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/pcb/",
-  },
-  {
-    title: "3D Case Design",
-    description: "OpenSCAD parametric case, 38×25×11mm",
-    category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/case/anticipy_pendant.scad",
-  },
-  {
-    title: "3D Product Render",
-    description: "Interactive 3D render for presentations",
-    category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/case/render_product.html",
+    href: "/internal/docs/assembly",
+    badge: "10 functional tests",
   },
   {
     title: "Packaging Design",
-    description: "Box specs, branding, accessories",
+    description: "Box specs (100×70×35mm matte black rigid), branding, quick-start card, accessories, print specs, sustainability",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/PACKAGING.md",
+    href: "/internal/docs/packaging",
+    badge: "$2.97 at 1k units",
   },
   {
     title: "Manufacturing Order Guide",
-    description: "How to order from JLCPCB, Bittele, etc.",
+    description: "JLCPCB, PCBWay, Seeed Fusion, MacroFab, Bittele (Toronto) — 7-day sample checklist with direct order links",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/firmware/MANUFACTURING_ORDER.md",
+    href: "/internal/docs/manufacturing",
+    badge: "~$37 USD/unit",
   },
   {
-    title: "Component Order Sheet",
-    description: "Direct buy links for all components, ~$90 CAD total",
+    title: "3D Case Design",
+    description: "OpenSCAD parametric case, 38×25×11mm. Print at JLCPCB 3D or Shapeways/Xometry for titanium premium.",
     category: "Hardware",
-    href: "https://github.com/omize10/Anticipy/blob/main/public/order.html",
+    href: "https://github.com/omize10/Anticipy/blob/main/firmware/case/anticipy_pendant.scad",
+    external: true,
+  },
+  {
+    title: "3D Product Render",
+    description: "Interactive 3D render for presentations and investor decks",
+    category: "Hardware",
+    href: "https://github.com/omize10/Anticipy/blob/main/firmware/case/render_product.html",
+    external: true,
+  },
+  {
+    title: "KiCad Project Files",
+    description: "KiCad schematic (.kicad_sch) and project files for PCB layout",
+    category: "Hardware",
+    href: "https://github.com/omize10/Anticipy/blob/main/firmware/pcb/",
+    external: true,
+  },
+
+  // Research docs — now internal pages
+  {
+    title: "Bill of Materials",
+    description: "All 16 components with verified prices and direct buy links. ~$77 CAD prototype. 72% under $100 CAD budget.",
+    category: "Research",
+    href: "/internal/docs/bom",
+    badge: "$77 CAD",
+  },
+  {
+    title: "Competitive Analysis",
+    description: "8 competitors: Humane (dead), Rabbit R1, Meta Ray-Ban, Plaud, Limitless (acquired), Friend (backlash), Bee AI (Amazon). $310B market by 2033.",
+    category: "Research",
+    href: "/internal/docs/competitive",
+    badge: "$310B by 2033",
   },
 
   // Software
   {
     title: "Engine Architecture",
-    description: "Full system overview: Next.js, Supabase, Chrome extension",
+    description: "Full system overview: Next.js, Supabase, Chrome extension, Browser Use, Gemini + Groq fallback",
     category: "Software",
     href: "https://github.com/omize10/Anticipy/blob/main/CLAUDE.md",
+    external: true,
+  },
+  {
+    title: "Action Engine (FastAPI)",
+    description: "Python FastAPI server, WebSocket handler, rate limiting, Browser Use integration",
+    category: "Software",
+    href: "https://github.com/omize10/Anticipy/blob/main/engine/app/main.py",
+    external: true,
   },
   {
     title: "Intent Detection Prompt",
-    description: "Chain-of-thought reasoning, context-aware importance",
+    description: "Chain-of-thought reasoning, context-aware importance, task classification",
     category: "Software",
     href: "https://github.com/omize10/Anticipy/blob/main/src/lib/intent-prompt.ts",
-  },
-  {
-    title: "Execute Action",
-    description: "3-tier execution: API, messaging, browser agent",
-    category: "Software",
-    href: "https://github.com/omize10/Anticipy/blob/main/src/lib/execute-action.ts",
+    external: true,
   },
   {
     title: "Chrome Extension Agent",
-    description: "LLM-powered browser automation in user's Chrome",
+    description: "LLM-powered browser automation in user's Chrome — DOM manipulation, form filling",
     category: "Software",
     href: "https://github.com/omize10/Anticipy/blob/main/extension/agent.js",
-  },
-  {
-    title: "Extension Content Script",
-    description: "DOM manipulation, form filling, page state extraction",
-    category: "Software",
-    href: "https://github.com/omize10/Anticipy/blob/main/extension/content.js",
+    external: true,
   },
   {
     title: "Extension Install Page",
-    description: "User-facing extension download and setup",
+    description: "User-facing extension download and setup at /engine/extension",
     category: "Software",
     href: "https://www.anticipy.ai/engine/extension",
+    external: true,
   },
 
-  // Research
+  // Orders
   {
-    title: "Bill of Materials",
-    description: "Verified component pricing: $28 CAD per prototype",
-    category: "Research",
-    href: "https://github.com/omize10/Anticipy/blob/main/docs/BOM.md",
+    title: "Order PCBs from JLCPCB",
+    description: "2-layer, 40×25mm, black HASL, 5 pcs + SMT assembly. ~$30–50 USD. 3–5 day production + DHL Express.",
+    category: "Orders",
+    href: "https://cart.jlcpcb.com/quote",
+    external: true,
+    badge: "~$40 USD/5 pcs",
   },
   {
-    title: "Competitive Analysis",
-    description: "8 competitors analyzed, market sizing $310B by 2033",
-    category: "Research",
-    href: "https://github.com/omize10/Anticipy/blob/main/docs/COMPETITIVE_ANALYSIS.md",
+    title: "Order 3D Cases from JLCPCB",
+    description: "PETG or SLA resin, matte black, 10 pieces (5 fronts + 5 backs). ~$15–30 USD.",
+    category: "Orders",
+    href: "https://jlcpcb.com/3d-printing",
+    external: true,
+    badge: "~$20 USD/10 pcs",
   },
   {
-    title: "Component Order Page",
-    description: "All components with direct purchase links",
-    category: "Research",
-    href: "https://github.com/omize10/Anticipy/blob/main/public/order.html",
+    title: "Order XIAO ESP32-S3",
+    description: "From Seeed Studio — $10.33 CAD each. 5+ recommended. Ships from Shenzhen via DHL.",
+    category: "Orders",
+    href: "https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html",
+    external: true,
+    badge: "$10.33 CAD",
+  },
+  {
+    title: "Order via Bittele (Toronto) — Zero Touch",
+    description: "Ship all files + components to Toronto. They assemble, test, flash, ship to West Vancouver. 5–10 days.",
+    category: "Orders",
+    href: "https://www.7pcb.com/",
+    external: true,
+    badge: "Full service",
+  },
+  {
+    title: "Order Packaging (Packlane)",
+    description: "Custom printed boxes from qty 10. ~$5–8/box. Or: noissue.co (eco), arka.com (mailers).",
+    category: "Orders",
+    href: "https://www.packlane.com/",
+    external: true,
+    badge: "$5–8/box",
+  },
+  {
+    title: "ShipBob Fulfillment — Surrey, BC",
+    description: "30 min from West Vancouver. Receives from manufacturer, stores inventory, ships to customers.",
+    category: "Orders",
+    href: "https://www.shipbob.com/",
+    external: true,
+    badge: "Surrey, BC",
   },
 
   // Testing
   {
     title: "Browser Test Suite",
-    description: "10 real-world browser automation tests",
+    description: "10 real-world browser automation tests. Target: 9/10 pass rate.",
     category: "Testing",
     href: "https://github.com/omize10/Anticipy/blob/main/engine/test_real.py",
+    external: true,
   },
   {
     title: "Stress Test Results",
@@ -164,7 +213,7 @@ const DOCS: DocItem[] = [
   },
   {
     title: "Action Engine",
-    description: "Live engine interface",
+    description: "Live engine interface at anticipy.ai/engine",
     category: "Links",
     href: "https://www.anticipy.ai/engine",
     external: true,
@@ -208,9 +257,7 @@ function fuzzyMatch(text: string, query: string): boolean {
   if (!query) return true;
   const t = text.toLowerCase();
   const q = query.toLowerCase();
-  // Substring match (handles typos via partial word matching)
   if (t.includes(q)) return true;
-  // Character-sequence fuzzy match
   let qi = 0;
   for (let i = 0; i < t.length && qi < q.length; i++) {
     if (t[i] === q[qi]) qi++;
@@ -251,18 +298,12 @@ export default function InternalPage() {
       style={{ background: "#0C0C0C", color: "#F5F0EB", fontFamily: "var(--font-sans, sans-serif)" }}
     >
       {/* Header */}
-      <div
-        className="sticky top-0 z-10 border-b"
-        style={{ background: "#0C0C0C", borderColor: "#252525" }}
-      >
+      <div className="sticky top-0 z-10 border-b" style={{ background: "#0C0C0C", borderColor: "#252525" }}>
         <div className="max-w-5xl mx-auto px-4 py-4">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
             <div className="flex items-center gap-2">
               <span style={{ color: "#C8A97E", fontSize: "1.1rem" }}>◈</span>
-              <h1
-                className="text-lg font-semibold tracking-tight"
-                style={{ color: "#F5F0EB" }}
-              >
+              <h1 className="text-lg font-semibold tracking-tight" style={{ color: "#F5F0EB" }}>
                 Anticipy Internal
               </h1>
               <span
@@ -279,10 +320,7 @@ export default function InternalPage() {
 
           {/* Search */}
           <div className="relative mb-4">
-            <span
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none"
-              style={{ color: "#8A8A8A" }}
-            >
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "#8A8A8A" }}>
               ⌕
             </span>
             <input
@@ -291,24 +329,12 @@ export default function InternalPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 rounded-lg text-sm outline-none transition-all"
-              style={{
-                background: "#161616",
-                border: "1px solid #252525",
-                color: "#F5F0EB",
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#C8A97E";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#252525";
-              }}
+              style={{ background: "#161616", border: "1px solid #252525", color: "#F5F0EB" }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#C8A97E"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "#252525"; }}
             />
             {query && (
-              <button
-                onClick={() => setQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs"
-                style={{ color: "#8A8A8A" }}
-              >
+              <button onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs" style={{ color: "#8A8A8A" }}>
                 ✕
               </button>
             )}
@@ -353,14 +379,8 @@ export default function InternalPage() {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
             <span className="text-4xl" style={{ color: "#252525" }}>◎</span>
-            <p className="text-sm" style={{ color: "#8A8A8A" }}>
-              No documents match &ldquo;{query}&rdquo;
-            </p>
-            <button
-              onClick={() => { setQuery(""); setActiveCategory("All"); }}
-              className="text-xs underline"
-              style={{ color: "#C8A97E" }}
-            >
+            <p className="text-sm" style={{ color: "#8A8A8A" }}>No documents match &ldquo;{query}&rdquo;</p>
+            <button onClick={() => { setQuery(""); setActiveCategory("All"); }} className="text-xs underline" style={{ color: "#C8A97E" }}>
               Clear filters
             </button>
           </div>
@@ -377,8 +397,9 @@ export default function InternalPage() {
 }
 
 function DocCard({ doc }: { doc: DocItem }) {
-  const isExternal = doc.external || doc.href.startsWith("http");
+  const isExternal = doc.external || (doc.href.startsWith("http") && doc.external !== false);
   const isPlaceholder = doc.href.startsWith("#");
+  const isInternal = !isExternal && !isPlaceholder;
 
   return (
     <a
@@ -389,66 +410,56 @@ function DocCard({ doc }: { doc: DocItem }) {
       className="group flex flex-col gap-2.5 p-4 rounded-xl transition-all"
       style={{
         background: "#161616",
-        border: "1px solid #252525",
+        border: isInternal ? "1px solid rgba(200,169,126,0.2)" : "1px solid #252525",
         cursor: isPlaceholder ? "default" : "pointer",
         textDecoration: "none",
       }}
       onMouseEnter={(e) => {
         if (!isPlaceholder) {
-          e.currentTarget.style.borderColor = "rgba(200,169,126,0.35)";
+          e.currentTarget.style.borderColor = "rgba(200,169,126,0.45)";
           e.currentTarget.style.background = "#1A1A1A";
         }
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "#252525";
+        e.currentTarget.style.borderColor = isInternal ? "rgba(200,169,126,0.2)" : "#252525";
         e.currentTarget.style.background = "#161616";
       }}
     >
-      {/* Top row: category badge + external indicator */}
+      {/* Top row: category badge + indicator */}
       <div className="flex items-center justify-between gap-2">
-        <span
-          className={`text-xs font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category]}`}
-        >
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[doc.category]}`}>
           {CATEGORY_ICONS[doc.category]} {doc.category}
         </span>
-        {isExternal && (
-          <span className="text-xs" style={{ color: "#5A5A5A" }}>↗</span>
-        )}
-        {isPlaceholder && (
-          <span className="text-xs" style={{ color: "#5A5A5A" }}>internal</span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {doc.badge && (
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(200,169,126,0.1)", color: "#C8A97E", border: "1px solid rgba(200,169,126,0.2)" }}>
+              {doc.badge}
+            </span>
+          )}
+          {isExternal && <span className="text-xs" style={{ color: "#5A5A5A" }}>↗</span>}
+          {isInternal && <span className="text-xs" style={{ color: "#C8A97E" }}>→</span>}
+          {isPlaceholder && <span className="text-xs" style={{ color: "#5A5A5A" }}>internal</span>}
+        </div>
       </div>
 
       {/* Title */}
-      <p
-        className="text-sm font-medium leading-snug"
-        style={{ color: "#F5F0EB" }}
-      >
+      <p className="text-sm font-medium leading-snug" style={{ color: "#F5F0EB" }}>
         {doc.title}
       </p>
 
       {/* Description */}
-      <p
-        className="text-xs leading-relaxed flex-1"
-        style={{ color: "#8A8A8A" }}
-      >
+      <p className="text-xs leading-relaxed flex-1" style={{ color: "#8A8A8A" }}>
         {doc.description}
       </p>
 
       {/* Path hint */}
-      {!isExternal && !isPlaceholder && (
-        <p
-          className="text-xs font-mono truncate mt-auto"
-          style={{ color: "#5A5A5A" }}
-        >
+      {isInternal && (
+        <p className="text-xs font-mono truncate mt-auto" style={{ color: "#C8A97E", opacity: 0.6 }}>
           {doc.href}
         </p>
       )}
       {isExternal && (
-        <p
-          className="text-xs font-mono truncate mt-auto"
-          style={{ color: "#5A5A5A" }}
-        >
+        <p className="text-xs font-mono truncate mt-auto" style={{ color: "#5A5A5A" }}>
           {doc.href.replace("https://", "")}
         </p>
       )}
