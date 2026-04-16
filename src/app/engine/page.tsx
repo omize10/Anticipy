@@ -85,6 +85,8 @@ export default function EnginePage() {
 
   // ── Setup state ─────────────────────────────────────────────────────────────
   const [accessCode, setAccessCode] = useState("");
+  const [accessCodeLoading, setAccessCodeLoading] = useState(false);
+  const [accessCodeError, setAccessCodeError] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [setupDismissed, setSetupDismissed] = useState(false);
 
@@ -131,8 +133,13 @@ export default function EnginePage() {
   // Fetch access code once authenticated
   useEffect(() => {
     if (!session) return;
+    setAccessCodeLoading(true);
+    setAccessCodeError(false);
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return;
+      if (!session) {
+        setAccessCodeLoading(false);
+        return;
+      }
       try {
         const res = await fetch("/api/extension/access-code", {
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -140,9 +147,13 @@ export default function EnginePage() {
         if (res.ok) {
           const data = await res.json();
           setAccessCode(data.code || "");
+        } else {
+          setAccessCodeError(true);
         }
       } catch {
-        // Non-critical
+        setAccessCodeError(true);
+      } finally {
+        setAccessCodeLoading(false);
       }
     });
   }, [session]);
@@ -1209,7 +1220,18 @@ export default function EnginePage() {
                   >
                     Your access code
                   </p>
-                  {accessCode ? (
+                  {accessCodeLoading ? (
+                    <div
+                      className="animate-spin"
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        border: "2px solid rgba(255,255,255,0.1)",
+                        borderTopColor: "var(--gold)",
+                      }}
+                    />
+                  ) : accessCode ? (
                     <div className="flex items-center gap-2">
                       <code
                         style={{
@@ -1246,6 +1268,10 @@ export default function EnginePage() {
                         {codeCopied ? "Copied!" : "Copy"}
                       </button>
                     </div>
+                  ) : accessCodeError ? (
+                    <p style={{ fontSize: 12, color: "#f87171" }}>
+                      Could not load access code — try refreshing the page.
+                    </p>
                   ) : (
                     <p
                       style={{
@@ -1253,7 +1279,7 @@ export default function EnginePage() {
                         color: "var(--text-on-dark-muted)",
                       }}
                     >
-                      Enter this code in the extension popup after installing.
+                      Your access code will appear here.
                     </p>
                   )}
                   <p
