@@ -6,11 +6,8 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/extension/access-code
  *
- * Returns the extension access code to authenticated users.
- * Requires a valid Supabase JWT in the Authorization header.
- *
- * Headers: { Authorization: "Bearer <supabase_access_token>" }
- * Returns: { code: string }
+ * Returns the user's unique access code from engine_users table.
+ * Requires a valid engine JWT in the Authorization header.
  */
 export async function GET(req: Request) {
   const corsHeaders = {
@@ -30,15 +27,30 @@ export async function GET(req: Request) {
   const token = authHeader.slice(7);
 
   const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
   );
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
+  // Try to decode as engine JWT first (has user_id claim)
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    if (payload.user_id) {
+      const { data: user } = await supabase
+        .from("engine_users")
+        .select("access_code")
+        .eq("id", payload.user_id)
+        .single();
 
+      if (user?.access_code) {
+        return NextResponse.json({ code: user.access_code }, { headers: corsHeaders });
+      }
+    }
+  } catch {
+    // Not an engine JWT, try Supabase auth below
+  }
+
+  // Fallback: Supabase auth token → look up by email
+  const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) {
     return NextResponse.json(
       { error: "Invalid or expired session" },
@@ -46,9 +58,20 @@ export async function GET(req: Request) {
     );
   }
 
-  const code = process.env.EXTENSION_ACCESS_CODE ?? "123";
+  const { data: engineUser } = await supabase
+    .from("engine_users")
+    .select("access_code")
+    .eq("email", user.email)
+    .single();
 
-  return NextResponse.json({ code }, { headers: corsHeaders });
+  if (engineUser?.access_code) {
+    return NextResponse.json({ code: engineUser.access_code }, { headers: corsHeaders });
+  }
+
+  return NextResponse.json(
+    { error: "No access code found — sign up on the engine page first" },
+    { status: 404, headers: corsHeaders }
+  );
 }
 
 export async function OPTIONS() {

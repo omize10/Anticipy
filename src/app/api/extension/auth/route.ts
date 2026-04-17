@@ -1,23 +1,21 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/extension/auth
  *
- * Authenticates the Chrome extension with a shared access code and returns
- * the LLM API keys the extension needs to run the browser agent.
+ * Authenticates the Chrome extension with a per-user access code
+ * and returns the LLM API keys the extension needs.
  *
  * Body: { code: string }
  * Returns: { groqApiKey: string, geminiApiKey: string }
  *
- * The access code is stored in the EXTENSION_ACCESS_CODE env var.
- * The API keys are returned from GROQ_API_KEY / GOOGLE_API_KEY env vars —
- * they are never hardcoded in the extension source.
+ * Validates the code against engine_users.access_code in Supabase.
+ * Each user has a unique code generated at signup.
  */
 export async function POST(req: Request) {
-  // CORS headers — Chrome extensions use their extension ID as origin,
-  // which is allowed by the browser for host_permissions matches.
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -36,10 +34,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing access code" }, { status: 400, headers: corsHeaders });
   }
 
-  const validCode = process.env.EXTENSION_ACCESS_CODE ?? "123";
+  const trimmedCode = code.trim();
 
-  // Constant-time comparison to prevent timing attacks
-  if (!timingSafeEqual(code.trim(), validCode.trim())) {
+  // Look up the code in engine_users table
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  );
+
+  const { data: user, error } = await supabase
+    .from("engine_users")
+    .select("id, username")
+    .eq("access_code", trimmedCode)
+    .single();
+
+  if (error || !user) {
     return NextResponse.json({ error: "Invalid access code" }, { status: 401, headers: corsHeaders });
   }
 
@@ -51,7 +60,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No LLM API keys configured on server" }, { status: 500, headers: corsHeaders });
   }
 
-  return NextResponse.json({ groqApiKey, geminiApiKey }, { headers: corsHeaders });
+  return NextResponse.json(
+    { groqApiKey, geminiApiKey, userId: user.id, username: user.username },
+    { headers: corsHeaders }
+  );
 }
 
 export async function OPTIONS() {
@@ -63,24 +75,4 @@ export async function OPTIONS() {
       "Access-Control-Allow-Headers": "Content-Type",
     },
   });
-}
-
-/**
- * XOR-based constant-time string comparison so timing attacks can't
- * determine how many characters matched.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    // Still iterate to prevent length leakage
-    let diff = 0;
-    for (let i = 0; i < Math.max(a.length, b.length); i++) {
-      diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-    }
-    return false;
-  }
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
