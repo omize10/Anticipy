@@ -165,6 +165,35 @@ export async function POST(req: Request) {
       const intentWithId = { ...intent, id: data.id };
       storedIntents.push(intentWithId);
 
+      // Broadcast to extension via Supabase Realtime (bypasses RLS — works with anon key)
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (supabaseUrl && serviceKey) {
+        fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({
+            messages: [{
+              topic: "anticipy-intents",
+              event: "new_intent",
+              payload: {
+                id: data.id,
+                action_type: intent.action_type,
+                importance: intent.importance,
+                confidence: intent.confidence,
+                summary_for_user: intent.summary_for_user,
+                evidence_quote: intent.evidence_quote,
+                status: "pending",
+              },
+            }],
+          }),
+        }).catch((e) => console.warn("[broadcast] failed:", e.message));
+      }
+
       // Importance-based notification dispatch:
       // critical → voice + SMS + email
       // important/standard → SMS + email

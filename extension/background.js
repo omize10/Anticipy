@@ -54,9 +54,10 @@ function connectRealtime() {
       updateBadge("connected");
       console.log("[Anticipy] Realtime connected");
 
+      // Channel 1: postgres_changes on anticipy_intents (works if RLS allows anon SELECT)
       joinRef++;
       realtimeWs.send(JSON.stringify({
-        topic: "realtime:public:anticipy_intents",
+        topic: "realtime:anticipy_db",
         event: "phx_join",
         payload: {
           config: {
@@ -65,7 +66,22 @@ function connectRealtime() {
               { event: "INSERT", schema: "public", table: "anticipy_intents" },
               { event: "UPDATE", schema: "public", table: "anticipy_intents" }
             ]
-          }
+          },
+          access_token: SUPABASE_ANON_KEY
+        },
+        ref: String(joinRef)
+      }));
+
+      // Channel 2: broadcast on "anticipy-intents" (no RLS, always works)
+      joinRef++;
+      realtimeWs.send(JSON.stringify({
+        topic: "realtime:anticipy-intents",
+        event: "phx_join",
+        payload: {
+          config: {
+            broadcast: { self: true },
+          },
+          access_token: SUPABASE_ANON_KEY
         },
         ref: String(joinRef)
       }));
@@ -82,7 +98,7 @@ function connectRealtime() {
 
         if (msg.event === "system" && msg.payload?.status === "ok") return;
 
-        // Supabase sends postgres_changes events
+        // postgres_changes events (if RLS allows)
         if (msg.event === "postgres_changes") {
           const change = msg.payload?.data;
           if (!change) return;
@@ -94,7 +110,16 @@ function connectRealtime() {
           return;
         }
 
-        // Some Supabase versions send the event type directly
+        // Broadcast events from the analyze route (no RLS, reliable)
+        if (msg.event === "broadcast") {
+          const inner = msg.payload;
+          if (inner?.event === "new_intent" && inner?.payload?.summary_for_user) {
+            handleNewIntent(inner.payload);
+          }
+          return;
+        }
+
+        // Legacy: some Supabase versions send event type directly
         if (msg.event === "INSERT") {
           const record = msg.payload?.record || msg.payload;
           if (record?.summary_for_user) handleNewIntent(record);
