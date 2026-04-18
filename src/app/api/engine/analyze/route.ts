@@ -80,29 +80,34 @@ export async function POST(req: Request) {
     let response: string = "";
     let usedModel = "kimi";
 
-    // Single-pass: Kimi first, Groq fallback. No retry hacks — the prompt
-    // must be good enough that any model gets it right on the first pass.
+    // Groq (Llama 3.3 70B) first — faster and more reliable for structured
+    // extraction. Kimi K2.5 as fallback for when Groq is rate-limited.
     try {
-      response = await callKimi(llmMessages, {
-        response_format: { type: "json_object" },
+      response = await callGroq(llmMessages, {
         temperature: 0.0,
+        response_format: { type: "json_object" },
         max_tokens: 8192,
       });
       if (!response || response.trim().length === 0) {
-        throw new Error("Kimi returned empty response");
+        throw new Error("Groq returned empty response");
       }
       JSON.parse(response);
-    } catch (kimiErr) {
-      console.warn("Kimi failed, falling back to Groq:", kimiErr);
       usedModel = "groq";
+    } catch (groqErr) {
+      console.warn("Groq failed, falling back to Kimi:", groqErr);
+      usedModel = "kimi";
       try {
-        response = await callGroq(llmMessages, {
-          temperature: 0.0,
+        response = await callKimi(llmMessages, {
           response_format: { type: "json_object" },
+          temperature: 0.0,
           max_tokens: 8192,
         });
-      } catch (groqErr) {
-        console.error("Groq fallback also failed:", groqErr);
+        if (!response || response.trim().length === 0) {
+          throw new Error("Kimi returned empty response");
+        }
+        JSON.parse(response);
+      } catch (kimiErr) {
+        console.error("Both models failed:", kimiErr);
         if (isFinal) {
           await supabaseAdmin
             .from("anticipy_sessions")
