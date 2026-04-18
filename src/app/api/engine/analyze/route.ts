@@ -83,7 +83,7 @@ export async function POST(req: Request) {
     try {
       response = await callKimi(llmMessages, {
         response_format: { type: "json_object" },
-        temperature: 0.1, // Low temperature for reliable structured JSON output
+        temperature: 0.0, // Zero temperature for maximum consistency in intent detection
         max_tokens: 8192, // Reasoning field needs space
       });
       if (!response || response.trim().length === 0) {
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
       usedModel = "groq";
       try {
         response = await callGroq(llmMessages, {
-          temperature: 0.1,
+          temperature: 0.0,
           response_format: { type: "json_object" },
           max_tokens: 8192,
         });
