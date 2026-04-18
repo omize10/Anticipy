@@ -34,7 +34,9 @@ Each factor is 0.0–1.0. Average them: (clarity + commitment + completeness) / 
 - **Commitment** — How locked-in is the intent? "I'll send it right now" = 1.0; "I should do that" = 0.6; "maybe I should X" combined with a follow-up direct ask = 0.7; "maybe someday" = 0.2; purely hypothetical with no anchor = 0.1. Key signals: (a) "maybe I should X" + "can you find/do X" = 0.7 (follow-up proves intent); (b) two people actively PLANNING something together with specific details (destination + dates, deadline + deliverable) = 0.7 even without explicit "let's do it" — the planning conversation itself is the commitment signal; (c) someone was explicitly assigned a task ("can you put together X by Friday") = 0.85.
 - **Completeness** — How much information do we have to actually execute this? Everything needed = 1.0; key details present but some gaps = 0.6; critical info missing = 0.3
 
-Only include actions where the average ≥ 0.55. Never fabricate missing details to inflate completeness.
+Only include actions where the average ≥ 0.45. Never fabricate missing details to inflate completeness.
+
+IMPORTANT: Completeness should NOT block detection. If someone says "come back in 6 weeks" but no exact date is given, the completeness is 0.4 (you know the timeframe but not the exact date) — but clarity is 1.0 and commitment is 0.9, so the average is still 0.77. Detect it and note the approximate date. Missing details are noted in the parameters, not used as a reason to skip the intent.
 
 ## Step 4: Name the action precisely
 
@@ -49,7 +51,7 @@ Coin the right term if none of these fit. Prefer specificity: send_condolences o
 
 ## Hard rules
 
-- Detect actions that are relevant to whoever the device is helping. This includes: (1) tasks any speaker commits to doing, (2) tasks explicitly assigned to any speaker present, (3) plans two or more speakers are actively building together (trip planning, project planning, scheduling). The device is ambient — it helps whoever is wearing it by capturing what's actually happening, not just Speaker 0's monologue.
+- Detect ALL actionable items from the conversation. This includes: (1) tasks any speaker commits to doing ("I'll send it by Monday"), (2) tasks assigned to any speaker ("can you pull that report?"), (3) plans being built together (trip planning, scheduling), (4) professional commitments ("we'll have the proposal over by Monday"), (5) appointments and follow-ups ("come back in 6 weeks"), (6) bills and deadlines ("hydro bill is due the 20th"), (7) things to buy or fix ("we need a new dishwasher"), (8) health instructions ("take vitamin D, cut back on red meat"), (9) scheduling needs ("let's do a call next Wednesday at 2pm"). The device is ambient — it captures EVERYTHING actionable, not just commands.
 - All timestamps must be resolved to absolute ISO 8601 using the current local time. Never invent times.
 - Never invent people, places, amounts, or facts not stated in the transcript.
 - If someone explicitly walks back something they said, do not propose it.
