@@ -70,25 +70,24 @@ export async function GET(req: Request) {
     if (intent) {
       const result = await executeAction(intent);
 
-      // Extension-routed actions: keep status as "confirmed" so the Supabase
-      // Realtime UPDATE event triggers the Chrome extension on the user's device.
-      // The extension then calls localhost:8000/execute-intent directly.
-      // For all other actions (calendar, email, SMS, note), update status normally.
-      if (result.data?.routing !== "extension") {
-        await supabaseAdmin
-          .from("anticipy_intents")
-          .update({ status: result.success ? "executed" : "failed" })
-          .eq("id", intentId);
+      // Always update intent status and log the action — including browser-routed ones.
+      // Browser-routed actions now save a note fallback inside executeAction, so
+      // there is always a record even if the extension never picks this up.
+      await supabaseAdmin
+        .from("anticipy_intents")
+        .update({ status: result.success ? "executed" : "failed" })
+        .eq("id", intentId);
 
-        await supabaseAdmin.from("anticipy_actions").insert({
-          intent_id: intentId,
-          status: result.success ? "success" : "failed",
-          result: result.data,
-          external_id: result.externalId,
-        });
-      } else {
-        // Browser-routed: broadcast confirmed_intent so the extension picks it up reliably.
-        // postgres_changes UPDATE events may not fire for anon users due to RLS.
+      await supabaseAdmin.from("anticipy_actions").insert({
+        intent_id: intentId,
+        status: result.success ? "success" : "failed",
+        result: result.data,
+        external_id: result.externalId,
+      });
+
+      // For browser-routed actions, also broadcast to the Chrome extension as an
+      // additional best-effort execution path (note fallback already saved above).
+      if (result.data?.routing === "browser") {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
         if (supabaseUrl && serviceKey) {
