@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const { sessionId, transcript, timezone = "America/Vancouver" } =
+    const { sessionId, transcript, timezone = "America/Vancouver", isFinal = true } =
       await req.json();
 
     if (!transcript || !sessionId) {
@@ -20,8 +20,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Verify session exists and is not already ended — prevents notification spam
-    // from arbitrary UUIDs sent by unauthenticated callers.
+    // Verify session exists — prevents notification spam from arbitrary UUIDs.
+    // Only block if already ended AND this is the final call (periodic mid-recording
+    // calls are allowed to run multiple times on the same session).
     const { data: session } = await supabaseAdmin
       .from("anticipy_sessions")
       .select("id, status")
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
         { status: 404 }
       );
     }
-    if (session.status === "ended") {
+    if (isFinal && session.status === "ended") {
       return NextResponse.json(
         { error: "Session already ended" },
         { status: 409 }
@@ -100,11 +101,13 @@ export async function POST(req: Request) {
         });
       } catch (groqErr) {
         console.error("Groq fallback also failed:", groqErr);
-        // Both models failed — mark session ended and return empty intents
-        await supabaseAdmin
-          .from("anticipy_sessions")
-          .update({ status: "ended" })
-          .eq("id", sessionId);
+        // Both models failed — mark session ended (if final) and return empty intents
+        if (isFinal) {
+          await supabaseAdmin
+            .from("anticipy_sessions")
+            .update({ status: "ended" })
+            .eq("id", sessionId);
+        }
         return NextResponse.json({ intents: [], totalInferred: 0, totalValid: 0 });
       }
     }
@@ -209,11 +212,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // Mark session as ended
-    await supabaseAdmin
-      .from("anticipy_sessions")
-      .update({ status: "ended" })
-      .eq("id", sessionId);
+    // Mark session as ended only on final analysis (not on periodic mid-recording calls)
+    if (isFinal) {
+      await supabaseAdmin
+        .from("anticipy_sessions")
+        .update({ status: "ended" })
+        .eq("id", sessionId);
+    }
 
     return NextResponse.json({
       intents: storedIntents,

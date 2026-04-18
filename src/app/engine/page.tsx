@@ -105,6 +105,7 @@ export default function EnginePage() {
   const chunksRef = useRef<Blob[]>([]);
   const sessionIdRef = useRef<string>("");
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const autoAnalyzeTimerRef = useRef<ReturnType<typeof setInterval>>();
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
@@ -171,6 +172,7 @@ export default function EnginePage() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (autoAnalyzeTimerRef.current) clearInterval(autoAnalyzeTimerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
@@ -376,6 +378,39 @@ export default function EnginePage() {
       timerRef.current = setInterval(() => {
         setDuration(Math.floor((Date.now() - startTime) / 1000));
       }, 1000);
+
+      // Auto-analyze every 30 seconds so intents surface live during recording
+      autoAnalyzeTimerRef.current = setInterval(async () => {
+        const currentSegments = liveSegmentsRef.current;
+        if (currentSegments.length === 0) return;
+        const transcriptStr = currentSegments
+          .map((s) => `[Speaker ${s.speaker_id}]: ${s.text}`)
+          .join("\n");
+        try {
+          const res = await fetch("/api/engine/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: sessionIdRef.current,
+              transcript: transcriptStr,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              isFinal: false,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.intents?.length) {
+              setIntents((prev) => {
+                const existingIds = new Set(prev.map((i) => i.id));
+                const newOnes = data.intents.filter((i: Intent) => !existingIds.has(i.id));
+                return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+              });
+            }
+          }
+        } catch {
+          // Non-fatal — next tick will retry
+        }
+      }, 30_000);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to start recording";
       setError(message);
@@ -388,6 +423,7 @@ export default function EnginePage() {
 
     setState("processing");
     if (timerRef.current) clearInterval(timerRef.current);
+    if (autoAnalyzeTimerRef.current) clearInterval(autoAnalyzeTimerRef.current);
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     setAudioLevel(0);
     setLiveText("");
@@ -481,7 +517,11 @@ export default function EnginePage() {
       const analyzeData = await analyzeRes.json();
       if (!analyzeRes.ok) throw new Error(analyzeData.error || "Analysis failed");
 
-      setIntents(analyzeData.intents ?? []);
+      setIntents((prev) => {
+        const existingIds = new Set(prev.map((i) => i.id));
+        const newOnes = (analyzeData.intents ?? []).filter((i: Intent) => !existingIds.has(i.id));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
       setState("done");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Analysis failed";
@@ -538,6 +578,7 @@ export default function EnginePage() {
   }, [manualTranscript, analyzeTranscript]);
 
   const reset = useCallback(() => {
+    if (autoAnalyzeTimerRef.current) clearInterval(autoAnalyzeTimerRef.current);
     setState("idle");
     setSegments([]);
     setIntents([]);
@@ -1487,6 +1528,35 @@ export default function EnginePage() {
                   Analyze Conversation
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Live intents during recording (from 30s auto-analyze) */}
+        {state === "recording" && intents.length > 0 && (
+          <div className="max-w-2xl mx-auto mb-8">
+            <h2
+              className="text-[13px] font-light tracking-wide-label uppercase mb-4"
+              style={{ color: "var(--gold)" }}
+            >
+              Actions detected
+            </h2>
+            <div className="space-y-3">
+              {intents.map((intent) => {
+                const style = IMPORTANCE_STYLES[intent.importance] ?? IMPORTANCE_STYLES.low;
+                return (
+                  <div
+                    key={intent.id}
+                    className="rounded-card p-4"
+                    style={{ background: style.bg, border: `1px solid ${style.border}` }}
+                  >
+                    <p className="text-[14px] font-medium">{intent.summary_for_user}</p>
+                    <p className="text-[12px] mt-1" style={{ color: "var(--gold)" }}>
+                      {intent.action_type.replace(/_/g, " ")}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
