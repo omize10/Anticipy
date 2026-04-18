@@ -110,11 +110,14 @@ function connectRealtime() {
           return;
         }
 
-        // Broadcast events from the analyze route (no RLS, reliable)
+        // Broadcast events (no RLS, reliable)
         if (msg.event === "broadcast") {
           const inner = msg.payload;
           if (inner?.event === "new_intent" && inner?.payload?.summary_for_user) {
             handleNewIntent(inner.payload);
+          }
+          if (inner?.event === "confirmed_intent" && inner?.payload?.id) {
+            handleConfirmedIntent(inner.payload);
           }
           return;
         }

@@ -86,6 +86,35 @@ export async function GET(req: Request) {
           result: result.data,
           external_id: result.externalId,
         });
+      } else {
+        // Browser-routed: broadcast confirmed_intent so the extension picks it up reliably.
+        // postgres_changes UPDATE events may not fire for anon users due to RLS.
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (supabaseUrl && serviceKey) {
+          fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: serviceKey,
+              Authorization: `Bearer ${serviceKey}`,
+            },
+            body: JSON.stringify({
+              messages: [{
+                topic: "anticipy-intents",
+                event: "confirmed_intent",
+                payload: {
+                  ...intent,
+                  status: "confirmed",
+                  parameters: {
+                    ...(intent.parameters as Record<string, unknown>),
+                    browser_task: result.data.task,
+                  },
+                },
+              }],
+            }),
+          }).catch((e: Error) => console.warn("[broadcast] confirmed_intent failed:", e.message));
+        }
       }
 
       executionMessage = result.message;
