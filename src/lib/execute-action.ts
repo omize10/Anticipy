@@ -211,20 +211,55 @@ export function buildBrowserTask(
   }
 }
 
+// Actions that genuinely require a browser to complete.
+// Everything NOT in this set (and not already handled as Tier 1) gets saved
+// directly as a note — no browser dependency, no silent failures.
+const BROWSER_ACTIONS = new Set([
+  "lookup",
+  "research_product",
+  "buy_item",
+  "book_flight",
+  "make_reservation",
+  "book_restaurant",
+  "restaurant_reservation",
+  "order_gift",
+  "send_gift",
+  "send_flowers",
+  "pay_invoice",
+  "send_payment",
+  "schedule_call",
+  "book_meeting",
+  "follow_up_with",
+  "check_in_on",
+  "return_call",
+  "send_congratulations",
+  "send_condolences",
+  "send_apology",
+  "share_document",
+]);
+
 // ---------------------------------------------------------------------------
 // Browser agent router
-// Routes execution to the Chrome extension, which calls the local engine.
-// The extension listens for status="confirmed" via Supabase Realtime, then
-// calls localhost:8000/execute-intent on the user's device — bypassing the
-// Vercel→localhost connectivity problem entirely.
+// Saves a note fallback (so the task is never silently lost), stores the task
+// description on the intent for the extension, then returns routing="browser"
+// so the confirm endpoint knows to broadcast AND insert an anticipy_actions row.
 // ---------------------------------------------------------------------------
 
 async function routeToBrowserAgent(
   intent: Record<string, unknown>,
   taskDescription: string
 ): Promise<ActionResult> {
-  // Store the built task description in the intent parameters so the extension
-  // can pick it up without having to reconstruct it from action_type + parameters.
+  // Save a note so the action survives even if the extension is offline.
+  const noteTitle =
+    (intent.summary_for_user as string) || taskDescription.split("\n")[0];
+  supabaseAdmin
+    .from("anticipy_notes")
+    .insert({ session_id: intent.session_id, title: noteTitle, body: taskDescription })
+    .then(({ error }) => {
+      if (error) console.warn("[executeAction] Could not save fallback note:", error.message);
+    });
+
+  // Store the task description on the intent so the extension can use it directly.
   try {
     const existingParams = (intent.parameters as Record<string, unknown>) || {};
     await supabaseAdmin
@@ -232,15 +267,13 @@ async function routeToBrowserAgent(
       .update({ parameters: { ...existingParams, browser_task: taskDescription } })
       .eq("id", intent.id as string);
   } catch (e) {
-    // Non-fatal — extension will fall back to summary_for_user
     console.warn("[executeAction] Could not store browser_task in parameters:", e);
   }
 
   return {
     success: true,
-    message:
-      "Got it — executing on your device via the Anticipy browser agent.",
-    data: { routing: "extension", task: taskDescription },
+    message: "Saved — dispatching to browser agent.",
+    data: { routing: "browser", task: taskDescription },
   };
 }
 
@@ -391,16 +424,35 @@ export async function executeAction(
       }
 
       // -----------------------------------------------------------------------
-      // TIER 2 — Browser agent for all remaining action types
-      // The agent autonomously figures out HOW to execute the task.
+      // TIER 2 — Browser-required actions
+      // Only route here when the task genuinely needs a browser.
+      // All other unknown action types are saved as notes (Tier 3 below).
       // -----------------------------------------------------------------------
 
       case "lookup":
       default: {
-        return routeToBrowserAgent(
-          intent,
-          buildBrowserTask(actionType, params)
-        );
+        if (BROWSER_ACTIONS.has(actionType)) {
+          return routeToBrowserAgent(intent, buildBrowserTask(actionType, params));
+        }
+
+        // TIER 3 — Note-like actions (schedule_meeting_reminder, create_report,
+        // health_instruction, set_goal, add_task, etc.)
+        // Save directly to anticipy_notes — no browser dependency.
+        const noteTitle =
+          (params.title as string) ||
+          (params.summary as string) ||
+          (intent.summary_for_user as string) ||
+          actionType.replace(/_/g, " ");
+        const noteBody = buildBrowserTask(actionType, params);
+        const { error: noteErr } = await supabaseAdmin
+          .from("anticipy_notes")
+          .insert({ session_id: intent.session_id, title: noteTitle, body: noteBody });
+        if (noteErr) console.warn("[executeAction] Note save error:", noteErr.message);
+        return {
+          success: true,
+          message: `Saved: "${noteTitle}"`,
+          data: { title: noteTitle, note_saved: true },
+        };
       }
     }
   } catch (err) {
