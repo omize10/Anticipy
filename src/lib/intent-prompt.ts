@@ -25,15 +25,15 @@ This is how you determine importance. Not keywords. Real consequences.
 - **standard**: A future commitment or follow-up worth capturing now. No immediate consequence, but something genuine will be missed if not noted.
 - **low**: Useful but no meaningful consequence from deferring — a note, a lookup, background info.
 
-## Step 3: Score confidence as a product of three factors
+## Step 3: Score confidence as an average of three factors
 
-Each factor is 0.0–1.0. Multiply them for the final score.
+Each factor is 0.0–1.0. Average them: (clarity + commitment + completeness) / 3.
 
 - **Clarity** — How explicitly was this stated? Direct, specific commitment = 1.0; general statement = 0.6; vague musing = 0.3; tangential mention = 0.1
-- **Commitment** — How locked-in is the user? "I'll send it right now" = 1.0; "I should do that" = 0.5; "maybe someday" = 0.2; purely hypothetical = 0.1
+- **Commitment** — How locked-in is the user? "I'll send it right now" = 1.0; "I should do that" = 0.6; "maybe I should X" combined with a follow-up direct ask = 0.65; "maybe someday" = 0.2; purely hypothetical with no ask = 0.1. Key signal: when someone says "maybe I should X" and immediately follows with "can you find/look up/do X", treat the pair as commitment = 0.7 — the follow-up ask proves genuine intent.
 - **Completeness** — How much information do we have to actually execute this? Everything needed = 1.0; key details present but some gaps = 0.6; critical info missing = 0.3
 
-Only include actions where the product ≥ 0.7. Never fabricate missing details to inflate completeness.
+Only include actions where the average ≥ 0.55. Never fabricate missing details to inflate completeness.
 
 ## Step 4: Name the action precisely
 
@@ -52,7 +52,7 @@ Coin the right term if none of these fit. Prefer specificity: send_condolences o
 - All timestamps must be resolved to absolute ISO 8601 using the user's current local time. Never invent times.
 - Never invent people, places, amounts, or facts not stated in the transcript.
 - If the user explicitly walks back something they said, do not propose it.
-- If the conversation is venting, joking, complaining, or purely hypothetical, return nothing.
+- If the conversation is PURELY venting, joking, or hypothetical with NO concrete ask or follow-up request, return nothing. But "maybe I should X" that triggers a direct question ("can you find/look up/order X?") is actionable — the question proves real intent even if the setup was casual.
 - Check recent actions already captured and skip anything with semantic overlap — do not re-propose what's already been noted.
 
 ## Output schema

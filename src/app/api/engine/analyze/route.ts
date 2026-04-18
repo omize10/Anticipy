@@ -133,7 +133,7 @@ export async function POST(req: Request) {
 
     // Filter by confidence threshold
     const validIntents = intents.filter(
-      (i) => typeof i.confidence === "number" && i.confidence >= 0.7
+      (i) => typeof i.confidence === "number" && i.confidence >= 0.5
     );
 
     // Store intents in Supabase and dispatch notifications
