@@ -80,56 +80,36 @@ export async function POST(req: Request) {
     let response: string = "";
     let usedModel = "kimi";
 
-    // Try Kimi first, then Groq as fallback. If the first attempt returns
-    // zero intents, retry ONCE with a nudge — the model sometimes under-detects.
-    const llmOpts = {
-      response_format: { type: "json_object" as const },
-      temperature: 0.0,
-      max_tokens: 8192,
-    };
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const messages = attempt === 0 ? llmMessages : [
-        ...llmMessages,
-        { role: "user" as const, content: "Look again carefully. Are there ANY tasks, appointments, deadlines, items to buy, calls to make, bills to pay, or follow-ups mentioned? Even implied ones. List them all." },
-      ];
-
-      try {
-        response = await callKimi(messages, llmOpts);
-        if (!response || response.trim().length === 0) {
-          throw new Error("Kimi returned empty response");
-        }
-        JSON.parse(response);
-        usedModel = "kimi";
-      } catch (kimiErr) {
-        if (attempt === 0) console.warn("Kimi failed, trying Groq:", kimiErr);
-        usedModel = "groq";
-        try {
-          response = await callGroq(messages, llmOpts);
-        } catch (groqErr) {
-          if (attempt === 1) {
-            console.error("Both models failed on both attempts:", groqErr);
-            if (isFinal) {
-              await supabaseAdmin
-                .from("anticipy_sessions")
-                .update({ status: "ended" })
-                .eq("id", sessionId);
-            }
-            return NextResponse.json({ intents: [], totalInferred: 0, totalValid: 0 });
-          }
-          continue;
-        }
+    // Single-pass: Kimi first, Groq fallback. No retry hacks — the prompt
+    // must be good enough that any model gets it right on the first pass.
+    try {
+      response = await callKimi(llmMessages, {
+        response_format: { type: "json_object" },
+        temperature: 0.0,
+        max_tokens: 8192,
+      });
+      if (!response || response.trim().length === 0) {
+        throw new Error("Kimi returned empty response");
       }
-
-      // Check if we got intents — if yes, break. If no, retry with nudge.
+      JSON.parse(response);
+    } catch (kimiErr) {
+      console.warn("Kimi failed, falling back to Groq:", kimiErr);
+      usedModel = "groq";
       try {
-        const check = JSON.parse(response);
-        if ((check.intents ?? []).length > 0) break;
-        if (attempt === 0) {
-          console.log(`[${usedModel}] Zero intents on first attempt, retrying with nudge...`);
+        response = await callGroq(llmMessages, {
+          temperature: 0.0,
+          response_format: { type: "json_object" },
+          max_tokens: 8192,
+        });
+      } catch (groqErr) {
+        console.error("Groq fallback also failed:", groqErr);
+        if (isFinal) {
+          await supabaseAdmin
+            .from("anticipy_sessions")
+            .update({ status: "ended" })
+            .eq("id", sessionId);
         }
-      } catch {
-        break; // Parsing failed, move on to the parse handler below
+        return NextResponse.json({ intents: [], totalInferred: 0, totalValid: 0 });
       }
     }
 
