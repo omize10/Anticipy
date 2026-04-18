@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { callKimi } from "@/lib/kimi";
 import { callGroq } from "@/lib/groq";
+import { callGemini } from "@/lib/gemini";
 import { buildIntentPrompt } from "@/lib/intent-prompt";
 import { sendIntentEmail } from "@/lib/resend-notify";
 import { sendTwilioNotification } from "@/lib/twilio-notify";
@@ -80,41 +81,29 @@ export async function POST(req: Request) {
     let response: string = "";
     let usedModel = "kimi";
 
-    // Groq (Llama 3.3 70B) first — faster and more reliable for structured
-    // extraction. Kimi K2.5 as fallback for when Groq is rate-limited.
-    try {
-      response = await callGroq(llmMessages, {
-        temperature: 0.0,
-        response_format: { type: "json_object" },
-        max_tokens: 8192,
-      });
-      if (!response || response.trim().length === 0) {
-        throw new Error("Groq returned empty response");
-      }
-      JSON.parse(response);
-      usedModel = "groq";
-    } catch (groqErr) {
-      console.warn("Groq failed, falling back to Kimi:", groqErr);
-      usedModel = "kimi";
+    // Gemini Flash first (GOOGLE_API_KEY confirmed on Vercel), Groq second, Kimi third
+    const models = [
+      { name: "gemini", fn: () => callGemini(llmMessages, { temperature: 0.0, max_tokens: 8192 }) },
+      { name: "groq", fn: () => callGroq(llmMessages, { temperature: 0.0, response_format: { type: "json_object" }, max_tokens: 8192 }) },
+      { name: "kimi", fn: () => callKimi(llmMessages, { response_format: { type: "json_object" }, temperature: 0.0, max_tokens: 8192 }) },
+    ];
+
+    for (const model of models) {
       try {
-        response = await callKimi(llmMessages, {
-          response_format: { type: "json_object" },
-          temperature: 0.0,
-          max_tokens: 8192,
-        });
-        if (!response || response.trim().length === 0) {
-          throw new Error("Kimi returned empty response");
-        }
+        response = await model.fn();
+        if (!response || response.trim().length === 0) throw new Error(`${model.name} empty`);
         JSON.parse(response);
-      } catch (kimiErr) {
-        console.error("Both models failed:", kimiErr);
-        if (isFinal) {
-          await supabaseAdmin
-            .from("anticipy_sessions")
-            .update({ status: "ended" })
-            .eq("id", sessionId);
+        usedModel = model.name;
+        break;
+      } catch (err) {
+        console.warn(`${model.name} failed:`, err instanceof Error ? err.message : err);
+        if (model.name === models[models.length - 1].name) {
+          console.error("All models failed");
+          if (isFinal) {
+            await supabaseAdmin.from("anticipy_sessions").update({ status: "ended" }).eq("id", sessionId);
+          }
+          return NextResponse.json({ intents: [], totalInferred: 0, totalValid: 0 });
         }
-        return NextResponse.json({ intents: [], totalInferred: 0, totalValid: 0 });
       }
     }
 
