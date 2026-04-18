@@ -1,5 +1,5 @@
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY ?? "";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_API_KEY}`;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GOOGLE_API_KEY}`;
 
 interface GeminiMessage {
   role: "system" | "user" | "assistant";
