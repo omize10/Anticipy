@@ -259,6 +259,7 @@ export async function POST(req: Request) {
       intents: storedIntents,
       totalInferred: intents.length,
       totalValid: validIntents.length,
+      _debug: { model: usedModel, responseLength: response?.length ?? 0, reasoning: parsed.reasoning?.substring(0, 200) },
     });
   } catch (err) {
     console.error("Analyze error:", err);
