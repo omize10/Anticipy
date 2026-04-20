@@ -214,7 +214,7 @@ async def main():
 
     print("=" * 60)
     print("ANTICIPY ACTION ENGINE — REAL TEST SUITE")
-    print("16 tests: 9 browser + 1 leakage audit + 3 intent + 3 extra browser")
+    print("22 tests: 9 browser + 1 leakage audit + 3 intent + 3 extra + 6 hard")
     print("=" * 60)
 
     # TEST 1: OpenTable search
@@ -372,16 +372,76 @@ async def main():
         ]),
     )
 
-    # Final leakage check across all 16 tests
+    # ── HARD TESTS (17-22) ──────────────────────────────────────────────────────
+
+    # TEST 17: Cross-site research — HackerNews headline → Wikipedia
+    await run_test(
+        17, "Cross-site: HackerNews → Wikipedia",
+        "Go to news.ycombinator.com and note the title and point count of the #1 ranked story. "
+        "Then search Wikipedia for the main topic in that title and give me the first sentence "
+        "of the Wikipedia article. Report both the HN story title and the Wikipedia sentence.",
+        lambda r: len(r) > 60 and any(c.isdigit() for c in r),
+        timeout=240,
+    )
+
+    # TEST 18: Multi-site price comparison — BestBuy CA vs Amazon CA
+    await run_test(
+        18, "Multi-site price comparison: BestBuy vs Amazon",
+        "Go to bestbuy.ca and search for 'Sony WH-1000XM5'. Note the price. "
+        "Then go to amazon.ca and search for the same headphones. Note that price. "
+        "Which store has the lower price today? Show exact prices from both.",
+        lambda r: "$" in r and r.lower().count("$") >= 1 and any(c.isdigit() for c in r),
+        timeout=300,
+    )
+
+    # TEST 19: Paginated site — navigate to specific page, extract filtered result
+    await run_test(
+        19, "Paginated nav: quotes.toscrape page 5",
+        "Go to quotes.toscrape.com, navigate to page 5 (click Next until you reach page 5), "
+        "and list the first 3 quotes you see along with their authors.",
+        lambda r: len(r) > 60 and ("—" in r or "-" in r or "by" in r.lower() or any(c.isalpha() for c in r)),
+        timeout=180,
+    )
+
+    # TEST 20: Ambiguous instruction — no URL given, model must make a reasonable choice
+    await run_intent_test(
+        20, "Ambiguous: 'What's trending right now?'",
+        "What's trending right now?",
+        lambda cat, r: (
+            len(r) > 10
+            and "error" not in r.lower()
+        ),
+    )
+
+    # TEST 21: Dynamic/canvas-heavy page — Google Trends
+    await run_test(
+        21, "Google Trends — top US searches",
+        "Go to trends.google.com/trends/trendingsearches/daily?geo=US and tell me "
+        "the top 3 trending searches in the United States right now.",
+        lambda r: len(r) > 20,
+        timeout=180,
+    )
+
+    # TEST 22: Challenging DOM — table extraction + link detection
+    await run_test(
+        22, "Challenging DOM: table extraction",
+        "Go to the-internet.herokuapp.com/challenging-dom, read the table, "
+        "and tell me the value in the 3rd row of the first column. "
+        "Also tell me the text of the first row's action link (edit or delete).",
+        lambda r: len(r) > 10 and any(kw in r.lower() for kw in ["edit", "delete", "row", "column", "value", "lorem"]),
+        timeout=120,
+    )
+
+    # Final leakage check across all 22 tests
     print(f"\n{'='*60}")
-    print(f"FINAL LEAKAGE AUDIT (all 16 tests)")
+    print(f"FINAL LEAKAGE AUDIT (all 22 tests)")
     print(f"{'='*60}")
     all_responses = " ".join(r.get("response", "") for r in RESULTS)
     final_leak = check_leakage(all_responses)
     if final_leak:
         print(f"  WARNING: '{final_leak}' detected in combined responses")
     else:
-        print(f"  Clean — no technical leakage across all tests")
+        print(f"  Clean — no technical leakage across all 22 tests")
 
     # Summary
     print(f"\n{'='*60}")
