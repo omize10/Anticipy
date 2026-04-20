@@ -71,6 +71,13 @@ const DOCS: DocItem[] = [
     href: "https://github.com/omize10/Anticipy/blob/main/firmware/pcb/",
     external: true,
   },
+  {
+    title: "Firmware Upload (Web Flash)",
+    description: "Flash firmware to the ESP32-S3 pendant directly from Chrome — no drivers, no CLI. Web Serial API one-click upload.",
+    category: "Hardware",
+    href: "/internal/docs/pendant-upload",
+    badge: "Web Serial",
+  },
 
   // Research docs — now internal pages
   {
