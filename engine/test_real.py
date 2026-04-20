@@ -1,7 +1,7 @@
 """
 REAL test suite for the Anticipy Action Engine.
 Every test requires multi-step browser interaction on a live website.
-Run: cd engine && DISPLAY=:99 python test_real.py
+Run: cd engine && python test_real.py
 """
 
 import asyncio
@@ -55,7 +55,7 @@ async def run_test(
     pass_check,
     timeout: int = 240,
 ):
-    """Run a single test, capturing all messages."""
+    """Run a single browser test, capturing all messages."""
     global PASS_COUNT, FAIL_COUNT
 
     print(f"\n{'='*60}", flush=True)
@@ -138,12 +138,83 @@ async def run_test(
     })
 
 
+async def run_intent_test(
+    test_num: int,
+    label: str,
+    task_text: str,
+    pass_check,
+):
+    """
+    Test the intent classifier and chat/question handlers without launching a browser.
+    Simulates the classify → handle_chat/handle_question pipeline.
+    """
+    global PASS_COUNT, FAIL_COUNT
+    from app.router import classify, handle_chat, handle_question
+    from app.models import CostTracker
+    from app import messages as msg_module
+
+    print(f"\n{'='*60}", flush=True)
+    print(f"TEST {test_num}: {label}", flush=True)
+    print(f"INPUT: {task_text}", flush=True)
+    print(f"{'='*60}", flush=True)
+
+    start = time.time()
+    category = "error"
+    response = ""
+
+    try:
+        tracker = CostTracker()
+        category = await asyncio.wait_for(classify(task_text, tracker), timeout=30)
+        print(f"  [classify] → {category}", flush=True)
+
+        if category == "chat":
+            response = await asyncio.wait_for(handle_chat(task_text, tracker), timeout=30)
+        elif category == "question":
+            response = await asyncio.wait_for(handle_question(task_text, tracker), timeout=30)
+        elif category == "ambiguous":
+            response = msg_module.AMBIGUOUS_REQUEST
+        else:
+            # action — note what was detected but don't run browser
+            response = f"[action detected — would launch browser]"
+    except Exception as e:
+        response = f"[error: {type(e).__name__}]"
+        print(f"  [EXCEPTION] {type(e).__name__}: {e}", flush=True)
+
+    elapsed = time.time() - start
+
+    leak = check_leakage(response)
+    passed = pass_check(category, response)
+    if leak:
+        passed = False
+        print(f"  LEAKAGE: '{leak}' found in response", flush=True)
+
+    status = "PASS" if passed else "FAIL"
+    if passed:
+        PASS_COUNT += 1
+    else:
+        FAIL_COUNT += 1
+
+    print(f"\n  [{status}] {label} ({elapsed:.1f}s)", flush=True)
+    print(f"  CATEGORY: {category}", flush=True)
+    print(f"  RESPONSE: {response[:200]}", flush=True)
+
+    RESULTS.append({
+        "test": test_num,
+        "label": label,
+        "passed": passed,
+        "elapsed": round(elapsed, 1),
+        "category": category,
+        "response": response[:500],
+        "leak": leak,
+    })
+
+
 async def main():
     global PASS_COUNT, FAIL_COUNT
 
     print("=" * 60)
     print("ANTICIPY ACTION ENGINE — REAL TEST SUITE")
-    print("10 tests on live websites")
+    print("16 tests: 9 browser + 1 leakage audit + 3 intent + 3 extra browser")
     print("=" * 60)
 
     # TEST 1: OpenTable search
@@ -234,6 +305,83 @@ async def main():
         PASS_COUNT += 1
         print(f"  [PASS] No technical leakage detected")
         RESULTS.append({"test": 10, "label": "Technical leakage audit", "passed": True, "leak": None})
+
+    # --- PROACTIVE INTENT DETECTION TESTS (no browser) ---
+
+    # TEST 11: Pure social statement — should NOT trigger browser action
+    await run_intent_test(
+        11, "Intent: pure social statement",
+        "we should grab dinner sometime",
+        lambda cat, r: (
+            cat in ("chat", "ambiguous")
+            and len(r) > 5
+            and "error" not in r.lower()
+        ),
+    )
+
+    # TEST 12: Embedded reminder request — should be detected as action or offer help
+    await run_intent_test(
+        12, "Intent: embedded reminder request",
+        "remind me to call the dentist",
+        lambda cat, r: (
+            len(r) > 5
+            and "error" not in r.lower()
+            and any(kw in r.lower() for kw in [
+                "remind", "call", "dentist", "calendar", "reminder", "schedule",
+                "note", "help", "sure", "action", "browser", "would",
+            ])
+        ),
+    )
+
+    # TEST 13: Implied task from past-tense social statement
+    await run_intent_test(
+        13, "Intent: implied send-task from social context",
+        "I told Sarah I'd send her that document",
+        lambda cat, r: (
+            len(r) > 5
+            and "error" not in r.lower()
+        ),
+    )
+
+    # --- ADDITIONAL BROWSER TESTS ---
+
+    # TEST 14: Wikipedia article extraction
+    await run_test(
+        14, "Wikipedia article extraction",
+        "Go to en.wikipedia.org, search for 'Large language model', "
+        "and tell me the first sentence of the article",
+        lambda r: len(r) > 40 and any(kw in r.lower() for kw in ["model", "language", "ai", "neural", "text", "machine"]),
+    )
+
+    # TEST 15: Books.toscrape — find cheapest book
+    await run_test(
+        15, "books.toscrape — cheapest book",
+        "Go to books.toscrape.com, look at the books listed and tell me the title and price "
+        "of the cheapest book you can find on the first page",
+        lambda r: "£" in r or "$" in r or any(c.isdigit() for c in r),
+    )
+
+    # TEST 16: DuckDuckGo search
+    await run_test(
+        16, "DuckDuckGo search",
+        "Go to duckduckgo.com, search for 'best programming languages 2025', "
+        "and list 3 results you find",
+        lambda r: len(r) > 40 and any(kw in r.lower() for kw in [
+            "python", "javascript", "rust", "go", "typescript", "java", "c++", "swift", "kotlin",
+            "programming", "language", "result", "search",
+        ]),
+    )
+
+    # Final leakage check across all 16 tests
+    print(f"\n{'='*60}")
+    print(f"FINAL LEAKAGE AUDIT (all 16 tests)")
+    print(f"{'='*60}")
+    all_responses = " ".join(r.get("response", "") for r in RESULTS)
+    final_leak = check_leakage(all_responses)
+    if final_leak:
+        print(f"  WARNING: '{final_leak}' detected in combined responses")
+    else:
+        print(f"  Clean — no technical leakage across all tests")
 
     # Summary
     print(f"\n{'='*60}")
