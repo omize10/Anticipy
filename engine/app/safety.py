@@ -104,9 +104,9 @@ def _normalize(text: str) -> str:
 
 
 def _words_present(pattern: str, text: str) -> bool:
-    """Check if all words in pattern appear in text (in any order)."""
+    """Check if all words in pattern appear as whole words in text (in any order)."""
     pattern_words = pattern.split()
-    return all(w in text for w in pattern_words)
+    return all(bool(re.search(r"\b" + re.escape(w) + r"\b", text)) for w in pattern_words)
 
 
 def check_blocked(user_text: str) -> bool:
