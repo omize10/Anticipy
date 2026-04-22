@@ -8,6 +8,7 @@ const navLinks = [
   { label: "How It Works", href: "#how-it-works" },
   { label: "Privacy", href: "#privacy" },
   { label: "Pricing", href: "#pricing" },
+  { label: "Compare", href: "/compare" },
 ];
 
 export function Nav() {
@@ -72,20 +73,35 @@ export function Nav() {
 
         {/* Desktop links */}
         <div className="hidden md:flex items-center gap-8">
-          {navLinks.map((link) => (
-            <button
-              key={link.href}
-              onClick={() => scrollToSection(link.href)}
-              className="text-[14px] font-normal transition-colors duration-300 hover:opacity-80"
-              style={{
-                color: isLight
-                  ? "var(--text-on-light-muted)"
-                  : "var(--text-on-dark-muted)",
-              }}
-            >
-              {link.label}
-            </button>
-          ))}
+          {navLinks.map((link) =>
+            link.href.startsWith("/") ? (
+              <a
+                key={link.href}
+                href={link.href}
+                className="text-[14px] font-normal transition-colors duration-300 hover:opacity-80"
+                style={{
+                  color: isLight
+                    ? "var(--text-on-light-muted)"
+                    : "var(--text-on-dark-muted)",
+                }}
+              >
+                {link.label}
+              </a>
+            ) : (
+              <button
+                key={link.href}
+                onClick={() => scrollToSection(link.href)}
+                className="text-[14px] font-normal transition-colors duration-300 hover:opacity-80"
+                style={{
+                  color: isLight
+                    ? "var(--text-on-light-muted)"
+                    : "var(--text-on-dark-muted)",
+                }}
+              >
+                {link.label}
+              </button>
+            )
+          )}
           <button
             onClick={() => scrollToSection("#waitlist")}
             className="text-[15px] font-medium px-6 py-2.5 rounded-pill transition-all duration-300"
@@ -139,20 +155,35 @@ export function Nav() {
             }}
           >
             <div className="px-6 py-6 flex flex-col gap-4">
-              {navLinks.map((link) => (
-                <button
-                  key={link.href}
-                  onClick={() => scrollToSection(link.href)}
-                  className="text-left text-[16px] transition-colors duration-300"
-                  style={{
-                    color: isLight
-                      ? "var(--text-on-light)"
-                      : "var(--text-on-dark)",
-                  }}
-                >
-                  {link.label}
-                </button>
-              ))}
+              {navLinks.map((link) =>
+                link.href.startsWith("/") ? (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    className="text-left text-[16px] transition-colors duration-300"
+                    style={{
+                      color: isLight
+                        ? "var(--text-on-light)"
+                        : "var(--text-on-dark)",
+                    }}
+                  >
+                    {link.label}
+                  </a>
+                ) : (
+                  <button
+                    key={link.href}
+                    onClick={() => scrollToSection(link.href)}
+                    className="text-left text-[16px] transition-colors duration-300"
+                    style={{
+                      color: isLight
+                        ? "var(--text-on-light)"
+                        : "var(--text-on-dark)",
+                    }}
+                  >
+                    {link.label}
+                  </button>
+                )
+              )}
               <button
                 onClick={() => scrollToSection("#waitlist")}
                 className="mt-2 text-[15px] font-medium px-6 py-3 rounded-pill w-full transition-all duration-300"

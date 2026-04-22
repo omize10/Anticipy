@@ -3,6 +3,22 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Anticipy",
+  description:
+    "How Anticipy collects, uses, and protects your data. Our commitment to privacy-first AI wearable technology.",
+  openGraph: {
+    title: "Privacy Policy — Anticipy",
+    description:
+      "How Anticipy collects, uses, and protects your data.",
+    url: "https://anticipy.ai/privacy",
+    siteName: "Anticipy",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Privacy Policy — Anticipy",
+    description:
+      "How Anticipy collects, uses, and protects your data.",
+  },
 };
 
 export default function PrivacyPolicy() {
