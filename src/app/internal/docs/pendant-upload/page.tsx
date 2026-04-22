@@ -3,6 +3,17 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 
+// ─── Web Serial API types (minimal declarations) ──────────────────────────────
+declare global {
+  interface SerialPort {
+    open(options: { baudRate: number }): Promise<void>;
+    close(): Promise<void>;
+    setSignals(signals: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void>;
+    readonly readable: ReadableStream<Uint8Array> | null;
+    readonly writable: WritableStream<Uint8Array> | null;
+  }
+}
+
 // ─── ESP32 ROM Bootloader Protocol Constants ─────────────────────────────────
 const ESP_ROM_BAUD = 115200;
 const FLASH_BAUD = 921600;
@@ -16,7 +27,8 @@ const ESP_CHECKSUM_MAGIC = 0xef;
 
 function slip_encode(data: Uint8Array): Uint8Array {
   const out: number[] = [0xc0];
-  for (const b of data) {
+  for (let i = 0; i < data.length; i++) {
+    const b = data[i];
     if (b === 0xc0) { out.push(0xdb, 0xdc); }
     else if (b === 0xdb) { out.push(0xdb, 0xdd); }
     else { out.push(b); }
@@ -38,7 +50,7 @@ function make_cmd(cmd: number, data: Uint8Array, chk = 0): Uint8Array {
 
 function checksum(data: Uint8Array): number {
   let s = ESP_CHECKSUM_MAGIC;
-  for (const b of data) s ^= b;
+  for (let i = 0; i < data.length; i++) s ^= data[i];
   return s;
 }
 
@@ -96,7 +108,7 @@ class ESP32Flasher {
       if (!result) continue;
       const { value, done } = result as ReadableStreamReadResult<Uint8Array>;
       if (done || !value) continue;
-      for (const b of value) this.buf.push(b);
+      for (let i = 0; i < value.length; i++) this.buf.push(value[i]);
       if (this.buf.length > 0) return this.buf.shift()!;
     }
     return null;
