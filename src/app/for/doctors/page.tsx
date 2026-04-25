@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     title: "Anticipy for Doctors: AI Pendant for Personal and Admin Tasks",
     description:
       "Ambient intent for doctors outside the clinical setting. CME, scheduling, admin, with HIPAA boundaries discussed.",
-    url: "https://anticipy.ai/for/doctors",
+    url: "https://www.anticipy.ai/for/doctors",
     siteName: "Anticipy",
     type: "article",
   },
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
       "Ambient intent for doctors outside the clinical setting. CME, scheduling, admin, with HIPAA boundaries discussed.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/for/doctors",
+    canonical: "https://www.anticipy.ai/for/doctors",
   },
 };
 

@@ -18,7 +18,7 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://anticipy.ai"),
+  metadataBase: new URL("https://www.anticipy.ai"),
   title: "Anticipy — AI Wearable Pendant for Ambient Intent",
   description:
     "Anticipy listens to your life and acts on ambient intent — booking, scheduling, canceling, disputing — all autonomously. Titanium pendant. 8g. $149.",
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     title: "Anticipy — AI Wearable Pendant for Ambient Intent",
     description:
       "The AI wearable that listens to your life and handles what needs handling. Brushed titanium. 8 grams. $149.",
-    url: "https://anticipy.ai",
+    url: "https://www.anticipy.ai",
     siteName: "Anticipy",
     type: "website",
     locale: "en_US",
@@ -43,7 +43,7 @@ export const metadata: Metadata = {
       "The AI wearable that listens to your life and handles what needs handling. Brushed titanium. 8 grams. $149.",
   },
   alternates: {
-    canonical: "https://anticipy.ai",
+    canonical: "https://www.anticipy.ai",
   },
 };
 
@@ -51,7 +51,7 @@ const jsonLdOrganization = {
   "@context": "https://schema.org",
   "@type": "Organization",
   name: "Anticipation Labs Inc.",
-  url: "https://anticipy.ai",
+  url: "https://www.anticipy.ai",
   foundingDate: "2025",
   foundingLocation: {
     "@type": "Place",
@@ -80,7 +80,7 @@ const jsonLdProduct = {
     price: "149",
     priceCurrency: "USD",
     availability: "https://schema.org/PreOrder",
-    url: "https://anticipy.ai/waitlist",
+    url: "https://www.anticipy.ai/waitlist",
   },
 };
 
@@ -88,7 +88,7 @@ const jsonLdWebSite = {
   "@context": "https://schema.org",
   "@type": "WebSite",
   name: "Anticipy",
-  url: "https://anticipy.ai",
+  url: "https://www.anticipy.ai",
 };
 
 export default function RootLayout({

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Terms of Service — Anticipy",
     description:
       "Terms of service for Anticipy by Anticipation Labs Inc.",
-    url: "https://anticipy.ai/terms",
+    url: "https://www.anticipy.ai/terms",
     siteName: "Anticipy",
     type: "website",
   },

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Privacy Policy — Anticipy",
     description:
       "How Anticipy collects, uses, and protects your data.",
-    url: "https://anticipy.ai/privacy",
+    url: "https://www.anticipy.ai/privacy",
     siteName: "Anticipy",
     type: "website",
   },
@@ -74,7 +74,7 @@ export default function PrivacyPolicy() {
                 cloud-based action engine (the &ldquo;Service&rdquo;), and our
                 website located at{" "}
                 <a
-                  href="https://anticipy.ai"
+                  href="https://www.anticipy.ai"
                   className="text-gold hover:underline"
                 >
                   anticipy.ai

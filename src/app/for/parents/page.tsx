@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Anticipy for Parents: AI Pendant for Family Logistics",
     description:
       "School deadlines, doctor appointments, activity sign-ups. Anticipy catches what gets mentioned once and forgotten.",
-    url: "https://anticipy.ai/for/parents",
+    url: "https://www.anticipy.ai/for/parents",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "School deadlines, doctor appointments, activity sign-ups. Anticipy catches what gets mentioned once and forgotten.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/for/parents",
+    canonical: "https://www.anticipy.ai/for/parents",
   },
 };
 

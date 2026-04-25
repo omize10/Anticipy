@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Refund Policy — Anticipy",
     description:
       "Refund and cancellation policy for Anticipy pre-orders and subscriptions.",
-    url: "https://anticipy.ai/refund",
+    url: "https://www.anticipy.ai/refund",
     siteName: "Anticipy",
     type: "website",
   },

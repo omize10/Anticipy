@@ -9,7 +9,7 @@ Anticipy is a brushed-titanium AI wearable pendant (8 grams, $149) that captures
 - Name: Anticipation Labs Inc.
 - Founded: 2025
 - Location: Vancouver, BC, Canada
-- Website: https://anticipy.ai
+- Website: https://www.anticipy.ai
 
 ## Product
 
@@ -23,13 +23,13 @@ Anticipy is a brushed-titanium AI wearable pendant (8 grams, $149) that captures
 
 ## Key Pages
 
-- Homepage: https://anticipy.ai
-- Join Waitlist: https://anticipy.ai/waitlist
-- Invest: https://anticipy.ai/funded
-- Action Engine Demo: https://anticipy.ai/engine
-- Privacy Policy: https://anticipy.ai/privacy
-- Terms of Service: https://anticipy.ai/terms
-- Refund Policy: https://anticipy.ai/refund
+- Homepage: https://www.anticipy.ai
+- Join Waitlist: https://www.anticipy.ai/waitlist
+- Invest: https://www.anticipy.ai/funded
+- Action Engine Demo: https://www.anticipy.ai/engine
+- Privacy Policy: https://www.anticipy.ai/privacy
+- Terms of Service: https://www.anticipy.ai/terms
+- Refund Policy: https://www.anticipy.ai/refund
 
 ## How It Works
 

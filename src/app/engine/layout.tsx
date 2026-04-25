@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     title: "Action Engine — Anticipy",
     description:
       "AI agent that completes real tasks on real websites. Just tell it what you need.",
-    url: "https://anticipy.ai/engine",
+    url: "https://www.anticipy.ai/engine",
     siteName: "Anticipy",
     type: "website",
   },

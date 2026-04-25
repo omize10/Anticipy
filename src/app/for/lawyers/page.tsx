@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Anticipy for Lawyers: AI Pendant for Legal Professionals",
     description:
       "Ambient intent for legal professionals. Deadlines, bookings, and scheduling from conversation.",
-    url: "https://anticipy.ai/for/lawyers",
+    url: "https://www.anticipy.ai/for/lawyers",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "Ambient intent for legal professionals. Deadlines, bookings, and scheduling from conversation.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/for/lawyers",
+    canonical: "https://www.anticipy.ai/for/lawyers",
   },
 };
 

@@ -1,4 +1,4 @@
-# Anticipy — https://anticipy.ai
+# Anticipy — https://www.anticipy.ai
 # Allow all crawlers including AI engines
 
 User-agent: *
@@ -25,4 +25,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://anticipy.ai/sitemap.xml
+Sitemap: https://www.anticipy.ai/sitemap.xml

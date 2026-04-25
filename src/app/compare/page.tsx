@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Compare Anticipy to Other AI Wearables",
     description:
       "Feature-by-feature comparisons of Anticipy vs Limitless, Friend, and Bee AI wearables.",
-    url: "https://anticipy.ai/compare",
+    url: "https://www.anticipy.ai/compare",
     siteName: "Anticipy",
     type: "website",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "Feature-by-feature comparisons of Anticipy vs Limitless, Friend, and Bee AI wearables.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/compare",
+    canonical: "https://www.anticipy.ai/compare",
   },
 };
 

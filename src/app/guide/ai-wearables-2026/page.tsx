@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "The Complete Guide to AI Wearables in 2026",
     description:
       "Landscape analysis of AI wearables after the great 2025 consolidation. Categories, players, technology, privacy, and how to choose.",
-    url: "https://anticipy.ai/guide/ai-wearables-2026",
+    url: "https://www.anticipy.ai/guide/ai-wearables-2026",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "Landscape analysis of AI wearables after the great 2025 consolidation. Categories, players, technology, privacy, and how to choose.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/guide/ai-wearables-2026",
+    canonical: "https://www.anticipy.ai/guide/ai-wearables-2026",
   },
 };
 
@@ -83,11 +83,11 @@ const articleSchema = {
   publisher: {
     "@type": "Organization",
     name: "Anticipation Labs",
-    url: "https://anticipy.ai",
+    url: "https://www.anticipy.ai",
   },
   datePublished: "2026-04-22",
   dateModified: "2026-04-22",
-  url: "https://anticipy.ai/guide/ai-wearables-2026",
+  url: "https://www.anticipy.ai/guide/ai-wearables-2026",
 };
 
 const players = [

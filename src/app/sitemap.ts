@@ -1,7 +1,7 @@
 import { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://anticipy.ai";
+  const baseUrl = "https://www.anticipy.ai";
 
   return [
     {

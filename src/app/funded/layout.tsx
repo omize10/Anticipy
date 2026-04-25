@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     title: "Invest in Anticipy — AI Wearable That Acts",
     description:
       "Pre-seed investment opportunity in Anticipy, the AI wearable that autonomously completes tasks from ambient conversation.",
-    url: "https://anticipy.ai/funded",
+    url: "https://www.anticipy.ai/funded",
     siteName: "Anticipy",
     type: "website",
   },

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Anticipy for Founders: AI Pendant for Startup CEOs",
     description:
       "Ambient intent for founders. Catch the tasks that fall through the cracks of a 14-hour day.",
-    url: "https://anticipy.ai/for/founders",
+    url: "https://www.anticipy.ai/for/founders",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "Ambient intent for founders. Catch the tasks that fall through the cracks of a 14-hour day.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/for/founders",
+    canonical: "https://www.anticipy.ai/for/founders",
   },
 };
 

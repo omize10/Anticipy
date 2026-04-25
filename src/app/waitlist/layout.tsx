@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     title: "Join the Waitlist — Anticipy",
     description:
       "Be first to get the AI wearable that listens to your life and handles what needs handling.",
-    url: "https://anticipy.ai/waitlist",
+    url: "https://www.anticipy.ai/waitlist",
     siteName: "Anticipy",
     type: "website",
   },

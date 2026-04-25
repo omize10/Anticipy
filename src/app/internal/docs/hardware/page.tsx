@@ -295,7 +295,7 @@ IDLE × 5min ──► DEEP_SLEEP  (button to wake)`}</pre>
             <div>
               <div className="text-xs font-medium mb-2" style={{ color: "#8A8A8A" }}>Request</div>
               <div className="rounded-xl overflow-hidden" style={{ background: "#0A0A0A", border: "1px solid #252525" }}>
-                <pre className="text-xs p-4 overflow-x-auto" style={{ color: "#A0A0A0", fontFamily: "monospace" }}>{`POST https://anticipy.ai/api/engine/transcribe
+                <pre className="text-xs p-4 overflow-x-auto" style={{ color: "#A0A0A0", fontFamily: "monospace" }}>{`POST https://www.anticipy.ai/api/engine/transcribe
 Content-Type: application/octet-stream
 Authorization: Bearer <device_api_token>
 X-Device-ID: <MAC address hex, e.g. "AABBCCDDEEFF">

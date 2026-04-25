@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "What Is Ambient Intent? The AI Paradigm Beyond Voice Commands",
     description:
       "AI that detects what you need from natural conversation. No wake words. No commands. Just life.",
-    url: "https://anticipy.ai/ambient-intent",
+    url: "https://www.anticipy.ai/ambient-intent",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "AI that detects what you need from natural conversation. No wake words. No commands. Just life.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/ambient-intent",
+    canonical: "https://www.anticipy.ai/ambient-intent",
   },
 };
 

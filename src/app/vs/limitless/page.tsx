@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Anticipy vs Limitless Pendant: Full Comparison",
     description:
       "One records conversations. The other acts on them. Full feature comparison.",
-    url: "https://anticipy.ai/vs/limitless",
+    url: "https://www.anticipy.ai/vs/limitless",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "One records conversations. The other acts on them. Full feature comparison.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/vs/limitless",
+    canonical: "https://www.anticipy.ai/vs/limitless",
   },
 };
 

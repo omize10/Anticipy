@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Who Is Anticipy For? Use Cases by Role",
     description:
       "Real use cases for the AI wearable that acts. See how different professionals use ambient intent.",
-    url: "https://anticipy.ai/for",
+    url: "https://www.anticipy.ai/for",
     siteName: "Anticipy",
     type: "website",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "Real use cases for the AI wearable that acts. See how different professionals use ambient intent.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/for",
+    canonical: "https://www.anticipy.ai/for",
   },
 };
 

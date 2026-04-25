@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Anticipy vs Bee AI Wearable: Full Comparison",
     description:
       "Meeting notes vs task execution. Full comparison of two AI wearable approaches.",
-    url: "https://anticipy.ai/vs/bee",
+    url: "https://www.anticipy.ai/vs/bee",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "Meeting notes vs task execution. Full comparison of two AI wearable approaches.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/vs/bee",
+    canonical: "https://www.anticipy.ai/vs/bee",
   },
 };
 

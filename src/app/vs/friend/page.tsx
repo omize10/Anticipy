@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: "Anticipy vs Friend Pendant: Full Comparison",
     description:
       "AI companion vs AI agent. Full feature comparison of two wearable pendants.",
-    url: "https://anticipy.ai/vs/friend",
+    url: "https://www.anticipy.ai/vs/friend",
     siteName: "Anticipy",
     type: "article",
   },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
       "AI companion vs AI agent. Full feature comparison of two wearable pendants.",
   },
   alternates: {
-    canonical: "https://anticipy.ai/vs/friend",
+    canonical: "https://www.anticipy.ai/vs/friend",
   },
 };
 
