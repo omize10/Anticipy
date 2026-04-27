@@ -235,7 +235,8 @@ export async function POST(req: Request) {
           });
         }
       } else {
-        const emailResult = await sendIntentEmail(adminEmail, intentPayload, baseUrl);
+        const emailResult = await sendIntentEmail(
+          user_email || adminEmail, intentPayload, baseUrl);
         if (emailResult) {
           await supabaseAdmin.from("anticipy_notifications").insert({
             intent_id: data.id,
