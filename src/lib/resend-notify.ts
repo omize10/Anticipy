@@ -14,7 +14,8 @@ interface IntentNotification {
 export async function sendIntentEmail(
   toEmail: string,
   intent: IntentNotification,
-  baseUrl: string
+  baseUrl: string,
+  subjectPrefix?: string
 ): Promise<{ id: string } | null> {
   const confirmUrl = `${baseUrl}/api/engine/confirm?intentId=${intent.intentId}&action=yes`;
   const rejectUrl = `${baseUrl}/api/engine/confirm?intentId=${intent.intentId}&action=no`;
@@ -28,10 +29,14 @@ export async function sendIntentEmail(
           ? "🟡 Standard"
           : "⚪ Low";
 
+  const subject = subjectPrefix
+    ? `${subjectPrefix} Anticipy: ${intent.summary}`
+    : `Anticipy: ${intent.summary}`;
+
   const { data, error } = await resend.emails.send({
     from: FROM_EMAIL,
     to: toEmail,
-    subject: `Anticipy: ${intent.summary}`,
+    subject,
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 500px; margin: 0 auto; background: #0C0C0C; color: #FAFAFA; padding: 32px; border-radius: 16px;">
         <div style="margin-bottom: 24px;">

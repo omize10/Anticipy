@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const { sessionId, transcript, timezone = "America/Vancouver", isFinal = true } =
+    const { sessionId, transcript, timezone = "America/Vancouver", isFinal = true, user_email } =
       await req.json();
 
     if (!transcript || !sessionId) {
@@ -194,34 +194,56 @@ export async function POST(req: Request) {
       // important/standard → SMS + email
       // low → email only
       const importance = intent.importance as string;
-      const notifyEmail =
-        process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
+      const adminEmail = "omar@anticipy.ai";
       const baseUrl =
         process.env.NEXT_PUBLIC_SITE_URL ||
         (process.env.VERCEL_URL
           ? `https://${process.env.VERCEL_URL}`
           : "http://localhost:3000");
 
-      // Email for ALL importance levels
-      const emailResult = await sendIntentEmail(
-        notifyEmail,
-        {
-          intentId: data.id,
-          summary: intent.summary_for_user as string,
-          evidenceQuote: intent.evidence_quote as string,
-          importance,
-          actionType: intent.action_type as string,
-        },
-        baseUrl
-      );
+      const intentPayload = {
+        intentId: data.id,
+        summary: intent.summary_for_user as string,
+        evidenceQuote: intent.evidence_quote as string,
+        importance,
+        actionType: intent.action_type as string,
+      };
 
-      if (emailResult) {
-        await supabaseAdmin.from("anticipy_notifications").insert({
-          intent_id: data.id,
-          channel: "email",
-          recipient: notifyEmail,
-          status: "sent",
-        });
+      if (user_email) {
+        const userEmailResult = await sendIntentEmail(user_email, intentPayload, baseUrl);
+        if (userEmailResult) {
+          await supabaseAdmin.from("anticipy_notifications").insert({
+            intent_id: data.id,
+            channel: "email",
+            recipient: user_email,
+            status: "sent",
+          });
+        }
+
+        const adminEmailResult = await sendIntentEmail(
+          adminEmail,
+          intentPayload,
+          baseUrl,
+          `[Admin] User (${user_email}):`
+        );
+        if (adminEmailResult) {
+          await supabaseAdmin.from("anticipy_notifications").insert({
+            intent_id: data.id,
+            channel: "email",
+            recipient: adminEmail,
+            status: "sent",
+          });
+        }
+      } else {
+        const emailResult = await sendIntentEmail(adminEmail, intentPayload, baseUrl);
+        if (emailResult) {
+          await supabaseAdmin.from("anticipy_notifications").insert({
+            intent_id: data.id,
+            channel: "email",
+            recipient: adminEmail,
+            status: "sent",
+          });
+        }
       }
 
       // SMS + Voice for non-low importance levels
