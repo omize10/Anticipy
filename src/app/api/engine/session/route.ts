@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { requireSupabaseUser } from "@/lib/require-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(req: Request) {
+  const user = await requireSupabaseUser(req);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { data, error } = await supabaseAdmin
     .from("anticipy_sessions")
     .insert({ status: "recording" })
@@ -18,6 +24,11 @@ export async function POST() {
 }
 
 export async function PATCH(req: Request) {
+  const user = await requireSupabaseUser(req);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { sessionId, status, totalAudioSeconds } = await req.json();
 
   const update: Record<string, unknown> = {};

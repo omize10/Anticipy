@@ -246,12 +246,19 @@ export default function EnginePage() {
       setLiveText("");
       liveSegmentsRef.current = [];
 
-      const sessionRes = await fetch("/api/engine/session", { method: "POST" });
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      if (!authSession) throw new Error("Sign in required");
+      const authHeaders = { Authorization: `Bearer ${authSession.access_token}` };
+
+      const sessionRes = await fetch("/api/engine/session", {
+        method: "POST",
+        headers: authHeaders,
+      });
       const sessionData = await sessionRes.json();
       if (!sessionRes.ok) throw new Error(sessionData.error);
       sessionIdRef.current = sessionData.sessionId;
 
-      const keyRes = await fetch("/api/engine/deepgram-key");
+      const keyRes = await fetch("/api/engine/deepgram-key", { headers: authHeaders });
       const keyData = await keyRes.json();
       if (!keyRes.ok) throw new Error(keyData.error || "Failed to get Deepgram key");
 
@@ -387,9 +394,14 @@ export default function EnginePage() {
           .map((s) => `[Speaker ${s.speaker_id}]: ${s.text}`)
           .join("\n");
         try {
+          const { data: { session: s } } = await supabase.auth.getSession();
+          if (!s) return;
           const res = await fetch("/api/engine/analyze", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${s.access_token}`,
+            },
             body: JSON.stringify({
               sessionId: sessionIdRef.current,
               transcript: transcriptStr,
@@ -449,9 +461,13 @@ export default function EnginePage() {
 
     const finalSegments = liveSegmentsRef.current;
 
+    const { data: { session: authSession } } = await supabase.auth.getSession();
+    const authToken = authSession?.access_token;
+
     if (finalSegments.length === 0) {
       setState("transcribing");
       try {
+        if (!authToken) throw new Error("Sign in required");
         const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
         const formData = new FormData();
         formData.append("audio", audioBlob, "recording.webm");
@@ -459,6 +475,7 @@ export default function EnginePage() {
 
         const transcribeRes = await fetch("/api/engine/transcribe", {
           method: "POST",
+          headers: { Authorization: `Bearer ${authToken}` },
           body: formData,
         });
         const transcribeData = await transcribeRes.json();
@@ -489,11 +506,16 @@ export default function EnginePage() {
       is_final: true,
     }));
 
-    fetch("/api/engine/transcribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: sessionIdRef.current, segments: rows }),
-    }).catch(() => {});
+    if (authToken) {
+      fetch("/api/engine/transcribe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ sessionId: sessionIdRef.current, segments: rows }),
+      }).catch(() => {});
+    }
 
     const transcriptStr = finalSegments
       .map((s) => `[Speaker ${s.speaker_id}]: ${s.text}`)
@@ -505,9 +527,14 @@ export default function EnginePage() {
   const analyzeTranscript = useCallback(async (transcript: string) => {
     setState("analyzing");
     try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      if (!authSession) throw new Error("Sign in required");
       const analyzeRes = await fetch("/api/engine/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession.access_token}`,
+        },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           transcript,
@@ -539,7 +566,12 @@ export default function EnginePage() {
     setState("processing");
 
     try {
-      const sessionRes = await fetch("/api/engine/session", { method: "POST" });
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      if (!authSession) throw new Error("Sign in required");
+      const sessionRes = await fetch("/api/engine/session", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authSession.access_token}` },
+      });
       const sessionData = await sessionRes.json();
       if (!sessionRes.ok) throw new Error(sessionData.error);
       sessionIdRef.current = sessionData.sessionId;

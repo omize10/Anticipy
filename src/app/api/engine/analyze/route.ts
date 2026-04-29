@@ -6,13 +6,21 @@ import { buildIntentPrompt } from "@/lib/intent-prompt";
 import { sendIntentEmail } from "@/lib/resend-notify";
 import { sendTwilioNotification } from "@/lib/twilio-notify";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { requireSupabaseUser } from "@/lib/require-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const authedUser = await requireSupabaseUser(req);
+  if (!authedUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const { sessionId, transcript, timezone = "America/Vancouver", isFinal = true, user_email } =
+    const { sessionId, transcript, timezone = "America/Vancouver", isFinal = true } =
       await req.json();
+    // Email recipient is the authenticated user — never trust a client-supplied address.
+    const user_email = authedUser.email;
 
     if (!transcript || !sessionId) {
       return NextResponse.json(

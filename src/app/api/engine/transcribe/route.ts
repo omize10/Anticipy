@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { transcribeAudio } from "@/lib/deepgram";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { requireSupabaseUser } from "@/lib/require-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const user = await requireSupabaseUser(req);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const contentType = req.headers.get("content-type") || "";
 
