@@ -2,7 +2,8 @@ export function buildIntentPrompt(
   transcript: string,
   localTime: string,
   timezone: string,
-  recentActions: string[] = []
+  recentActions: string[] = [],
+  crossSessionContext: string[] = []
 ): { system: string; user: string } {
   const system = `You are an ambient intelligence assistant that listens to real conversations and extracts ALL actionable items.
 
@@ -35,14 +36,25 @@ If the conversation is purely casual with zero actionable content: { "reasoning"
 
   const recentActionsText =
     recentActions.length > 0
-      ? `Already captured — skip duplicates:\n${recentActions.map((a, i) => `  ${i + 1}. ${a}`).join("\n")}`
-      : "None yet.";
+      ? `Already captured this session — skip duplicates:
+${recentActions.map((a, i) => `  ${i + 1}. ${a}`).join('
+')}`
+      : 'None yet.';
+
+  const crossSessionText =
+    crossSessionContext.length > 0
+      ? `
+From earlier conversations today:
+${crossSessionContext.map((a, i) => `  ${i + 1}. ${a}`).join('
+')}
+Use this context to detect follow-ups, avoid duplicates, and understand ongoing threads.`
+      : '';
 
   const user = `${transcript}
 
 ---
 Current local time: ${localTime} (${timezone})
-Recent actions: ${recentActionsText}
+Recent actions: ${recentActionsText}${crossSessionText}
 
 Extract all actionable items. Reason briefly, then output JSON.`;
 

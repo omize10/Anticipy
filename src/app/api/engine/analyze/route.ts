@@ -73,12 +73,46 @@ export async function POST(req: Request) {
       (i) => i.summary_for_user
     );
 
+    // Cross-session memory: fetch intents from user's other sessions in past 24h
+    let crossSessionContext: string[] = [];
+    try {
+      const twentyFourHoursAgo = new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      const { data: userSessions } = await supabaseAdmin
+        .from("anticipy_sessions")
+        .select("id")
+        .eq("user_id", authedUser.id)
+        .neq("id", sessionId)
+        .gte("started_at", twentyFourHoursAgo)
+        .order("started_at", { ascending: false })
+        .limit(10);
+
+      if (userSessions && userSessions.length > 0) {
+        const otherSessionIds = userSessions.map((s) => s.id);
+        const { data: crossIntents } = await supabaseAdmin
+          .from("anticipy_intents")
+          .select("summary_for_user, action_type, created_at")
+          .in("session_id", otherSessionIds)
+          .order("created_at", { ascending: false })
+          .limit(10);
+
+        crossSessionContext = (crossIntents ?? []).map(
+          (i) => "[" + i.action_type + "] " + i.summary_for_user
+        );
+      }
+    } catch (err) {
+      console.warn("Cross-session memory query failed:", err);
+    }
+
     // Build the prompt
     const { system, user } = buildIntentPrompt(
       transcript,
       localTime,
       timezone,
-      recentActions
+      recentActions,
+      crossSessionContext
     );
 
     const llmMessages = [

@@ -12,7 +12,11 @@ export async function POST(req: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("anticipy_sessions")
-    .insert({ status: "recording" })
+    .insert({
+      status: "recording",
+      user_id: user.id,
+      user_email: user.email ?? null,
+    })
     .select("id")
     .single();
 
