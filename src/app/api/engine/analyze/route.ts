@@ -146,7 +146,6 @@ export async function POST(req: Request) {
     ];
 
     let response: string = "";
-    let usedModel = "kimi";
 
     // Gemini Flash first (GOOGLE_API_KEY confirmed on Vercel), Groq second, Kimi third
     const models = [
@@ -160,7 +159,6 @@ export async function POST(req: Request) {
         response = await model.fn();
         if (!response || response.trim().length === 0) throw new Error(`${model.name} empty`);
         JSON.parse(response);
-        usedModel = model.name;
         break;
       } catch (err) {
         console.warn(`${model.name} failed:`, err instanceof Error ? err.message : err);
@@ -174,10 +172,6 @@ export async function POST(req: Request) {
       }
     }
 
-    console.log(
-      `Intent analysis completed via ${usedModel}, response length: ${response.length}`
-    );
-
     let parsed: { reasoning?: string; intents: Array<Record<string, unknown>> };
     try {
       parsed = JSON.parse(response);
@@ -187,11 +181,6 @@ export async function POST(req: Request) {
         response?.substring(0, 200)
       );
       parsed = { intents: [] };
-    }
-
-    // Log the model's reasoning for debugging and quality monitoring
-    if (parsed.reasoning) {
-      console.log(`[${usedModel}] Intent reasoning:\n${parsed.reasoning}`);
     }
 
     const intents: RawIntent[] = parsed.intents ?? [];
@@ -304,7 +293,7 @@ export async function POST(req: Request) {
       // critical → voice + SMS + email
       // important/standard → SMS + email
       // low → email only
-      const adminEmail = "omar@anticipy.ai";
+      const adminEmail = process.env.ADMIN_EMAIL || "omar@anticipy.ai";
       const baseUrl =
         process.env.NEXT_PUBLIC_SITE_URL ||
         (process.env.VERCEL_URL
@@ -377,12 +366,6 @@ export async function POST(req: Request) {
       totalInferred: intents.length,
       totalValid: validIntents.length,
       totalSkippedDuplicates: skippedDuplicates,
-      _debug: {
-        model: usedModel,
-        responseLength: response?.length ?? 0,
-        reasoning: parsed.reasoning?.substring(0, 200),
-        skippedDuplicates,
-      },
     });
   } catch (err) {
     console.error("Analyze error:", err);
@@ -392,4 +375,3 @@ export async function POST(req: Request) {
     );
   }
 }
-// cache bust 1776487693

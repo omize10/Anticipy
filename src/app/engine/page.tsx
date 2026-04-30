@@ -83,6 +83,12 @@ export default function EnginePage() {
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authSuccess, setAuthSuccess] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  // True when the user just clicked a password-reset email link. Supabase
+  // signs them in with a temporary recovery session, but they must call
+  // updateUser({ password }) before the new password takes effect.
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [recoveryUpdated, setRecoveryUpdated] = useState(false);
 
   // ── Setup state ─────────────────────────────────────────────────────────────
   const [accessCode, setAccessCode] = useState("");
@@ -146,9 +152,17 @@ export default function EnginePage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (session) setAuthLoading(false);
+      // Recovery sessions are signed-in sessions with a single privileged
+      // operation: changing the password. Surface a "set new password" form
+      // instead of dropping the user straight into the engine UI.
+      if (event === "PASSWORD_RECOVERY") {
+        setRecoveryMode(true);
+        setRecoveryUpdated(false);
+        setAuthError("");
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -269,6 +283,40 @@ export default function EnginePage() {
     setAccessCode("");
     setSetupDismissed(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSetNewPassword = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      setAuthError("");
+      setAuthSubmitting(true);
+      try {
+        const { error } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+        if (error) {
+          setAuthError(error.message);
+        } else {
+          setRecoveryUpdated(true);
+          setNewPassword("");
+        }
+      } finally {
+        setAuthSubmitting(false);
+      }
+    },
+    [newPassword]
+  );
+
+  const exitRecoveryMode = useCallback(async () => {
+    // Drop the recovery session — the user is now expected to sign in
+    // normally with their new password.
+    await supabase.auth.signOut();
+    setRecoveryMode(false);
+    setRecoveryUpdated(false);
+    setNewPassword("");
+    setAuthMode("signin");
+    setAuthEmail("");
+    setAuthPassword("");
+  }, []);
 
   const copyCode = useCallback(() => {
     if (!accessCode) return;
@@ -830,6 +878,225 @@ export default function EnginePage() {
             borderTopColor: "var(--gold)",
           }}
         />
+      </div>
+    );
+  }
+
+  // ── Password recovery screen ────────────────────────────────────────────────
+  // Surfaces after the user clicks the reset email and Supabase emits a
+  // PASSWORD_RECOVERY event. The session technically exists at this point,
+  // but we want to force a password change before continuing.
+
+  if (recoveryMode) {
+    return (
+      <div
+        style={{
+          background: "var(--dark)",
+          minHeight: "100vh",
+          color: "var(--text-on-dark)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          padding: "48px 24px 24px",
+        }}
+      >
+        <a
+          href="/"
+          className="font-serif"
+          style={{
+            fontSize: 26,
+            color: "var(--text-on-dark)",
+            textDecoration: "none",
+            marginBottom: 48,
+          }}
+        >
+          Anticipy
+        </a>
+
+        <div
+          style={{
+            maxWidth: 420,
+            width: "100%",
+            margin: "auto 0",
+            paddingTop: 24,
+            paddingBottom: 24,
+          }}
+        >
+          <div
+            style={{
+              background: "var(--dark-elevated)",
+              border: "1px solid var(--dark-border)",
+              borderRadius: 16,
+              padding: 28,
+            }}
+          >
+            {recoveryUpdated ? (
+              <div style={{ textAlign: "center", padding: "8px 0" }}>
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: "50%",
+                    background: "rgba(76,175,80,0.12)",
+                    border: "1px solid rgba(76,175,80,0.25)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    margin: "0 auto 16px",
+                    fontSize: 20,
+                    color: "#4CAF50",
+                  }}
+                >
+                  ✓
+                </div>
+                <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 8 }}>
+                  Password updated
+                </h2>
+                <p
+                  style={{
+                    fontSize: 14,
+                    color: "var(--text-on-dark-muted)",
+                    fontWeight: 300,
+                    lineHeight: 1.6,
+                    marginBottom: 20,
+                  }}
+                >
+                  Your new password is set. Sign in again to continue.
+                </p>
+                <button
+                  onClick={exitRecoveryMode}
+                  style={{
+                    width: "100%",
+                    padding: "11px",
+                    background: "var(--gold)",
+                    color: "var(--dark)",
+                    border: "none",
+                    borderRadius: 100,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Back to sign in
+                </button>
+              </div>
+            ) : (
+              <>
+                <h2
+                  className="font-serif"
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 400,
+                    marginBottom: 8,
+                    textAlign: "center",
+                  }}
+                >
+                  Set a new password
+                </h2>
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text-on-dark-muted)",
+                    fontWeight: 300,
+                    lineHeight: 1.6,
+                    marginBottom: 20,
+                    textAlign: "center",
+                  }}
+                >
+                  Choose a new password for{" "}
+                  <strong style={{ color: "var(--text-on-dark)" }}>
+                    {session?.user.email}
+                  </strong>
+                  .
+                </p>
+                <form onSubmit={handleSetNewPassword}>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="New password (8+ characters)"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                    autoFocus
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 8,
+                      color: "var(--text-on-dark)",
+                      fontSize: 14,
+                      outline: "none",
+                      boxSizing: "border-box",
+                      marginBottom: 12,
+                    }}
+                  />
+                  {authError && (
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "#ef4444",
+                        marginBottom: 12,
+                      }}
+                    >
+                      {authError}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={authSubmitting || newPassword.length < 8}
+                    style={{
+                      width: "100%",
+                      padding: "11px",
+                      background: "var(--gold)",
+                      color: "var(--dark)",
+                      border: "none",
+                      borderRadius: 100,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor:
+                        authSubmitting || newPassword.length < 8
+                          ? "not-allowed"
+                          : "pointer",
+                      opacity:
+                        authSubmitting || newPassword.length < 8 ? 0.6 : 1,
+                      transition: "opacity 0.2s",
+                    }}
+                  >
+                    {authSubmitting ? "…" : "Update password"}
+                  </button>
+                </form>
+                <button
+                  type="button"
+                  onClick={exitRecoveryMode}
+                  style={{
+                    width: "100%",
+                    marginTop: 12,
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-on-dark-muted)",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <p
+          style={{
+            marginTop: 32,
+            fontSize: 12,
+            color: "rgba(255,255,255,0.2)",
+          }}
+        >
+          &copy; 2026 Anticipation Labs
+        </p>
       </div>
     );
   }

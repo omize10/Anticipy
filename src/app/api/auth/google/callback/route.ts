@@ -50,10 +50,22 @@ export async function GET(request: NextRequest) {
         headers: { Authorization: `Bearer ${tokens.access_token}` },
       });
       const userInfo = await userInfoRes.json();
-      email = userInfo.email || process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
+      email = userInfo.email;
     }
 
-    await storeTokens(email || "omar@anticipy.ai", {
+    // Fail closed: never store tokens under a fallback email — that would
+    // attribute the connected calendar to the wrong user.
+    if (!email) {
+      return new Response(
+        renderPage(
+          "Couldn't identify account",
+          "We couldn't determine which Anticipy account this calendar belongs to. Please start again from the Engine page."
+        ),
+        { headers: { "Content-Type": "text/html" }, status: 400 }
+      );
+    }
+
+    await storeTokens(email, {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: Date.now() + (tokens.expires_in ?? 3600) * 1000,

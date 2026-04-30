@@ -285,13 +285,14 @@ async function routeToBrowserAgent(
  * Looks up the email of the user that owns the session this intent belongs to.
  * Calendar tokens are keyed by app-user email, so we need this to dispatch
  * to the right calendar when multiple users have connected their own.
- * Falls back to the env-configured admin email if the session row has no
- * user_email (legacy rows from before per-user signup).
+ * Falls back to the env-configured admin email only when the session row has
+ * no user_email (legacy rows from before per-user signup) — never to a
+ * hardcoded address, since that would silently use the wrong account.
  */
 async function resolveSessionUserEmail(
   intent: Record<string, unknown>
 ): Promise<string> {
-  const fallback = process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
+  const fallback = process.env.ADMIN_EMAIL || process.env.TEST_USER_EMAIL || "";
   const sessionId = intent.session_id as string | undefined;
   if (!sessionId) return fallback;
   try {
