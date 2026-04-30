@@ -1323,7 +1323,7 @@ export default function EnginePage() {
                     />
                   </div>
                   {authMode !== "reset" && (
-                    <div style={{ marginBottom: 6 }}>
+                    <div style={{ marginBottom: 16 }}>
                       <input
                         type="password"
                         value={authPassword}
