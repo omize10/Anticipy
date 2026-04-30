@@ -20,10 +20,10 @@ export async function POST(req: Request) {
     .select("id")
     .single();
 
-  if (error || !data) {
-    console.error("Session POST error:", error);
+  if (error) {
+    console.error("Session insert error:", error);
     return NextResponse.json(
-      { error: "Could not start session." },
+      { error: "Could not create session." },
       { status: 500 }
     );
   }
@@ -37,17 +37,21 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-  const sessionId = typeof body.sessionId === "string" ? body.sessionId : null;
-  const status = typeof body.status === "string" ? body.status : null;
-  const totalAudioSeconds =
-    typeof body.totalAudioSeconds === "number" ? body.totalAudioSeconds : null;
-
-  if (!sessionId) {
+  const { sessionId, status, totalAudioSeconds } = await req.json();
+  if (!sessionId || typeof sessionId !== "string") {
     return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+  }
+
+  // Only allow updating sessions owned by this user. Without this check, any
+  // authed user who knows another user's session UUID could end their
+  // recording or rewrite their status field.
+  const { data: existing } = await supabaseAdmin
+    .from("anticipy_sessions")
+    .select("user_id")
+    .eq("id", sessionId)
+    .single();
+  if (!existing || (existing.user_id && existing.user_id !== user.id)) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
   const update: Record<string, unknown> = {};
@@ -55,27 +59,16 @@ export async function PATCH(req: Request) {
   if (totalAudioSeconds != null) update.total_audio_seconds = totalAudioSeconds;
   if (status === "ended") update.ended_at = new Date().toISOString();
 
-  // Scope the update to rows owned by the caller — without this, any
-  // authenticated user could mutate any session by guessing its UUID.
-  const { data: updated, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("anticipy_sessions")
     .update(update)
-    .eq("id", sessionId)
-    .eq("user_id", user.id)
-    .select("id");
+    .eq("id", sessionId);
 
   if (error) {
-    console.error("Session PATCH error:", error);
+    console.error("Session update error:", error);
     return NextResponse.json(
       { error: "Could not update session." },
       { status: 500 }
-    );
-  }
-
-  if (!updated || updated.length === 0) {
-    return NextResponse.json(
-      { error: "Session not found or not yours." },
-      { status: 404 }
     );
   }
 

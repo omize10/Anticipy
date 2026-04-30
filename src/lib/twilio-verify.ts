@@ -1,87 +1,75 @@
 import crypto from "crypto";
 
 /**
- * Validates an inbound Twilio webhook request using the X-Twilio-Signature
- * header. Without this check, anyone could POST a forged Body/From and
- * confirm or reject another user's pending intents.
+ * Verify a Twilio webhook signature.
  *
- * Algorithm: HMAC-SHA1 over (full URL + sorted concatenated form params),
- * base64-encoded, compared against the header in constant time.
+ * Twilio signs each webhook with HMAC-SHA1 over the URL plus the POST body
+ * params concatenated key+value in alphabetical order. Without this check,
+ * anyone can POST to /api/engine/twilio/{sms-reply,voice-callback} and
+ * confirm/reject pending intents on behalf of arbitrary phone numbers /
+ * intent IDs.
  *
- * Returns true when:
- *   - TWILIO_AUTH_TOKEN is set AND the signature matches.
+ * Returns true if the request is authentic, false otherwise. Fails closed:
+ * if TWILIO_AUTH_TOKEN is unset, returns false (refuses all webhook traffic).
  *
- * Returns false when:
- *   - TWILIO_AUTH_TOKEN is set AND the signature is missing or wrong.
- *
- * When TWILIO_AUTH_TOKEN is NOT set (mock/dev mode), validation is skipped
- * and the function returns true. Production deployments MUST set the env
- * var so the webhooks are actually authenticated.
+ * The exported variant `verifyTwilioRequest` reads the signature header,
+ * the request URL, and a parsed FormData body — call it after consuming
+ * the body since FormData/Request bodies can only be read once.
  */
-export function verifyTwilioSignature(
+function expectedSignature(
+  authToken: string,
   url: string,
-  params: Record<string, string>,
-  signatureHeader: string | null
+  params: Record<string, string>
+): string {
+  const sortedKeys = Object.keys(params).sort();
+  let payload = url;
+  for (const key of sortedKeys) {
+    payload += key + params[key];
+  }
+  return crypto
+    .createHmac("sha1", authToken)
+    .update(payload, "utf8")
+    .digest("base64");
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+export function verifyTwilioRequest(
+  signatureHeader: string | null,
+  webhookUrl: string,
+  formParams: Record<string, string>
 ): boolean {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!authToken) {
-    return true;
-  }
-  if (!signatureHeader) {
-    return false;
-  }
-
-  const sortedKeys = Object.keys(params).sort();
-  let data = url;
-  for (const key of sortedKeys) {
-    data += key + params[key];
-  }
-
-  const expected = crypto
-    .createHmac("sha1", authToken)
-    .update(data, "utf-8")
-    .digest("base64");
-
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signatureHeader);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  if (!authToken) return false;
+  if (!signatureHeader) return false;
+  const expected = expectedSignature(authToken, webhookUrl, formParams);
+  return safeEqual(expected, signatureHeader);
 }
 
 /**
- * Reads the FormData from a Twilio request, validates the signature, and
- * returns either the validated params or null if validation fails.
- *
- * The full URL must be passed in by the caller because Next.js's
- * `request.url` may already be canonicalized in ways that differ from
- * what Twilio signed (e.g., trailing slashes). We rebuild it from the
- * forwarded host headers so the signature matches.
+ * Build the URL Twilio used to sign this request. Twilio signs the original
+ * request URL — including query string and the original host header. Behind
+ * Vercel's proxy, `req.url` will be `http://0.0.0.0/...` internally, so we
+ * reconstruct from x-forwarded-* headers when present.
  */
-export async function readVerifiedTwilioBody(
-  req: Request
-): Promise<{ params: Record<string, string> } | null> {
-  const formData = await req.formData();
+export function reconstructWebhookUrl(req: Request): string {
+  const url = new URL(req.url);
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  if (forwardedHost) url.host = forwardedHost;
+  if (forwardedProto) url.protocol = forwardedProto + ":";
+  return url.toString();
+}
+
+export function formDataToParams(formData: FormData): Record<string, string> {
   const params: Record<string, string> = {};
   formData.forEach((value, key) => {
-    if (typeof value === "string") {
-      params[key] = value;
-    }
+    params[key] = typeof value === "string" ? value : "";
   });
-
-  const signature = req.headers.get("x-twilio-signature");
-
-  // Reconstruct the public URL Twilio used. Vercel sets x-forwarded-host
-  // and x-forwarded-proto so the inner Request.url (which uses the
-  // internal hostname) doesn't break signature verification.
-  const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  const inner = new URL(req.url);
-  const publicUrl = host
-    ? `${proto}://${host}${inner.pathname}${inner.search}`
-    : req.url;
-
-  if (!verifyTwilioSignature(publicUrl, params, signature)) {
-    return null;
-  }
-  return { params };
+  return params;
 }

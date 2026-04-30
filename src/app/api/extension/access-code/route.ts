@@ -82,9 +82,9 @@ async function ensureAccessCode(
  * GET /api/extension/access-code
  *
  * Returns the user's unique access code from engine_users table.
- * Requires a valid engine JWT or Supabase auth token in the Authorization header.
- * If the caller is a Supabase auth user without an engine_users row yet,
- * one is provisioned on the fly.
+ * Requires a valid Supabase auth token in the Authorization header. If the
+ * caller is a Supabase auth user without an engine_users row yet, one is
+ * provisioned on the fly.
  */
 export async function GET(req: Request) {
   const corsHeaders = {
@@ -108,12 +108,8 @@ export async function GET(req: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
   );
 
-  // Validate the Supabase access token. We do NOT decode arbitrary JWTs and
-  // trust their `user_id` claim — that path used to exist as a fallback for
-  // engine-issued JWTs but was unsigned/unverified, so any caller could forge
-  // a token claiming an arbitrary user_id and read that user's access code.
-  // The Next.js side has no access to the engine's JWT_SECRET, so the only
-  // safe authenticator here is Supabase.
+  // Verify with Supabase auth — never trust an unsigned JWT payload to look
+  // up another user's access_code.
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user || !user.email) {
     return NextResponse.json(

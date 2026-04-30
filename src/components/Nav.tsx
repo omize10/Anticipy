@@ -129,9 +129,9 @@ export function Nav() {
                 transform: mobileOpen
                   ? i === 0
                     ? "translateY(5px) rotate(45deg)"
-                    : i === 1
-                      ? "opacity: 0"
-                      : "translateY(-5px) rotate(-45deg)"
+                    : i === 2
+                      ? "translateY(-5px) rotate(-45deg)"
+                      : "none"
                   : "none",
                 opacity: mobileOpen && i === 1 ? 0 : 1,
               }}
