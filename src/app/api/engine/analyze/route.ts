@@ -28,22 +28,29 @@ const IGNORED_ACTION_TYPES = new Set([
 const CONFIDENCE_THRESHOLD = 0.65;
 const SUMMARY_OVERLAP_THRESHOLD = 0.8;
 
-function tokenize(text: string): Set<string> {
-  return new Set(
-    (text || "")
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((w) => w.length > 2)
-  );
+function tokenize(text: string): string[] {
+  const words = (text || "")
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w: string) => w.length > 2);
+  // Deduplicate without Set iteration
+  const seen: Record<string, boolean> = {};
+  return words.filter((w: string) => {
+    if (seen[w]) return false;
+    seen[w] = true;
+    return true;
+  });
 }
 
 function jaccardSimilarity(a: string, b: string): number {
   const wordsA = tokenize(a);
   const wordsB = tokenize(b);
-  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  if (wordsA.length === 0 || wordsB.length === 0) return 0;
+  const setB: Record<string, boolean> = {};
+  wordsB.forEach((w: string) => { setB[w] = true; });
   let intersection = 0;
-  for (const w of wordsA) if (wordsB.has(w)) intersection += 1;
-  const union = wordsA.size + wordsB.size - intersection;
+  wordsA.forEach((w: string) => { if (setB[w]) intersection += 1; });
+  const union = wordsA.length + wordsB.length - intersection;
   return union === 0 ? 0 : intersection / union;
 }
 
