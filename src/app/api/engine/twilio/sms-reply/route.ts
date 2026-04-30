@@ -1,17 +1,25 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { executeAction } from "@/lib/execute-action";
+import { readVerifiedTwilioBody } from "@/lib/twilio-verify";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Twilio inbound SMS webhook.
  * Parses YES/NO replies and confirms/rejects the most recent pending intent.
+ *
+ * The X-Twilio-Signature header is validated before any state changes —
+ * without it an attacker who knows a victim's phone number could forge a
+ * "YES" reply and trigger their pending action.
  */
 export async function POST(req: Request) {
-  const formData = await req.formData();
-  const body =
-    formData.get("Body")?.toString()?.trim().toLowerCase() || "";
-  const from = formData.get("From")?.toString() || "";
+  const verified = await readVerifiedTwilioBody(req);
+  if (!verified) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const body = (verified.params.Body || "").trim().toLowerCase();
+  const from = verified.params.From || "";
 
   if (!body || !from) {
     return twimlResponse("Anticipy: Sorry, I didn't understand that.");
@@ -67,11 +75,19 @@ export async function POST(req: Request) {
 
   const newStatus = isConfirm ? "confirmed" : "rejected";
 
-  await supabaseAdmin
+  // Atomic guard: only update if still pending, and check that we
+  // actually flipped a row. If 0 rows changed it was already handled
+  // (e.g. user clicked the email link first) — bail out before re-running.
+  const { data: flipped } = await supabaseAdmin
     .from("anticipy_intents")
     .update({ status: newStatus })
     .eq("id", intentId)
-    .eq("status", "pending"); // Double-guard against TOCTOU race
+    .eq("status", "pending")
+    .select("id");
+
+  if (!flipped || flipped.length === 0) {
+    return twimlResponse("Anticipy: That action has already been handled.");
+  }
 
   // Record the reply
   await supabaseAdmin

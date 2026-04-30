@@ -1,15 +1,25 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { readVerifiedTwilioBody } from "@/lib/twilio-verify";
 
 export const dynamic = "force-dynamic";
 
 /**
  * TwiML endpoint for Twilio voice calls.
  * Speaks the intent summary and gathers user response (speech or DTMF).
+ *
+ * Verified against the X-Twilio-Signature header — without this an
+ * attacker who guessed an intent UUID could pull the summary text by
+ * hitting this URL directly.
  */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ intentId: string }> }
 ) {
+  const verified = await readVerifiedTwilioBody(req);
+  if (!verified) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const { intentId } = await params;
 
   const { data: intent } = await supabaseAdmin
@@ -51,12 +61,11 @@ export async function POST(
   });
 }
 
-// Also handle GET for Twilio's initial request
-export async function GET(
-  req: Request,
-  context: { params: Promise<{ intentId: string }> }
-) {
-  return POST(req, context);
+// Twilio is configured (in twilio-notify.ts) to fetch this URL via POST,
+// so GET should never reach here in practice. We refuse it explicitly so an
+// unsigned probe can't bypass the signature check by switching method.
+export async function GET() {
+  return new Response("Method Not Allowed", { status: 405 });
 }
 
 function escapeXml(str: string): string {

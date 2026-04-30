@@ -1,11 +1,16 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { executeAction } from "@/lib/execute-action";
+import { readVerifiedTwilioBody } from "@/lib/twilio-verify";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Twilio voice callback - handles the user's response to a voice call.
  * Executes or rejects the intent based on speech/DTMF input.
+ *
+ * The X-Twilio-Signature header is validated before any state changes —
+ * without it anyone who guesses the intentId could forge a "1" digit and
+ * trigger another user's pending action.
  */
 export async function POST(req: Request) {
   const url = new URL(req.url);
@@ -15,12 +20,13 @@ export async function POST(req: Request) {
     return twimlResponse("Sorry, something went wrong. Goodbye.");
   }
 
-  const formData = await req.formData();
-  const digits = formData.get("Digits")?.toString();
-  const speechResult = formData
-    .get("SpeechResult")
-    ?.toString()
-    ?.toLowerCase();
+  const verified = await readVerifiedTwilioBody(req);
+  if (!verified) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const digits = verified.params.Digits;
+  const speechResult = verified.params.SpeechResult?.toLowerCase();
 
   const isConfirm =
     digits === "1" ||
@@ -42,23 +48,20 @@ export async function POST(req: Request) {
 
   const newStatus = isConfirm ? "confirmed" : "rejected";
 
-  // Guard: only update intents that are still pending to prevent double-execution
-  // (user could confirm via voice AND email link, or voice AND SMS reply).
-  const { data: currentIntent } = await supabaseAdmin
-    .from("anticipy_intents")
-    .select("status")
-    .eq("id", intentId)
-    .single();
-
-  if (!currentIntent || currentIntent.status !== "pending") {
-    return twimlResponse("That action has already been handled. Goodbye.");
-  }
-
-  await supabaseAdmin
+  // Atomic guard: a single conditional UPDATE eliminates the SELECT→UPDATE
+  // race that lets a duplicate webhook (voice + email + SMS hitting at once)
+  // execute the action twice. We rely on the returned row count, not on a
+  // prior SELECT, because PgBouncer can serve stale reads.
+  const { data: flipped } = await supabaseAdmin
     .from("anticipy_intents")
     .update({ status: newStatus })
     .eq("id", intentId)
-    .eq("status", "pending"); // Double-guard against TOCTOU race
+    .eq("status", "pending")
+    .select("id");
+
+  if (!flipped || flipped.length === 0) {
+    return twimlResponse("That action has already been handled. Goodbye.");
+  }
 
   if (isConfirm) {
     const { data: intent } = await supabaseAdmin

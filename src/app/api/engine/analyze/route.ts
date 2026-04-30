@@ -52,13 +52,15 @@ export async function POST(req: Request) {
         ? transcript.slice(transcript.length - MAX_TRANSCRIPT_CHARS)
         : transcript;
 
-    // Verify session exists — prevents notification spam from arbitrary UUIDs.
-    // Only block if already ended AND this is the final call (periodic mid-recording
-    // calls are allowed to run multiple times on the same session).
+    // Verify session exists AND is owned by the caller. Without the
+    // user_id check anyone authenticated could pump intents (and the
+    // notifications they trigger) into another user's session by
+    // guessing the UUID.
     const { data: session } = await supabaseAdmin
       .from("anticipy_sessions")
       .select("id, status")
       .eq("id", sessionId)
+      .eq("user_id", authedUser.id)
       .single();
 
     if (!session) {

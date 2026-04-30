@@ -13,6 +13,16 @@ const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
 // client can't insert millions of rows in a single request.
 const MAX_SEGMENTS_PER_REQUEST = 10_000;
 
+async function userOwnsSession(sessionId: string, userId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from("anticipy_sessions")
+    .select("id")
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return !!data;
+}
+
 export async function POST(req: Request) {
   const user = await requireSupabaseUser(req);
   if (!user) {
@@ -36,6 +46,12 @@ export async function POST(req: Request) {
           { error: "Too many segments in a single request." },
           { status: 413 }
         );
+      }
+
+      // Without this check any authenticated user could write transcript
+      // segments into another user's session by guessing the UUID.
+      if (!(await userOwnsSession(sessionId, user.id))) {
+        return NextResponse.json({ error: "Session not found." }, { status: 404 });
       }
 
       const { error: insertError } = await supabaseAdmin
@@ -66,6 +82,9 @@ export async function POST(req: Request) {
     }
     if (!sessionId) {
       return NextResponse.json({ error: "No sessionId" }, { status: 400 });
+    }
+    if (!(await userOwnsSession(sessionId, user.id))) {
+      return NextResponse.json({ error: "Session not found." }, { status: 404 });
     }
     if (audioFile.size > MAX_AUDIO_BYTES) {
       return NextResponse.json(
