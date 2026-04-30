@@ -1,3 +1,5 @@
+import { escapeHtml, sanitizeHeader } from "./escape";
+
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const FROM_EMAIL = "hello@anticipy.ai";
 const FROM_NAME = "Omar from Anticipy";
@@ -15,15 +17,19 @@ async function getSgMail() {
 export async function sendInvestorWelcome(email: string, name?: string | null) {
   if (!SENDGRID_API_KEY) return;
 
-  const firstName = name?.split(" ")[0] || "";
+  // Strip control chars (CR/LF specifically) from the subject to prevent
+  // header injection — a name with embedded "\r\nBcc: attacker@evil.com"
+  // would otherwise add covert recipients via SendGrid's transport.
+  const rawFirstName = sanitizeHeader(name?.split(" ")[0] || "", 60);
+  const firstName = escapeHtml(rawFirstName);
   const greeting = firstName ? `Hey ${firstName}` : "Hey there";
 
   const sgMail = await getSgMail();
   await sgMail.send({
     to: email,
     from: { email: FROM_EMAIL, name: FROM_NAME },
-    subject: firstName
-      ? `${firstName} — thanks for your interest in Anticipy`
+    subject: rawFirstName
+      ? `${rawFirstName} — thanks for your interest in Anticipy`
       : "Thanks for your interest in Anticipy",
     html: `
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a; line-height: 1.7;">
@@ -66,7 +72,9 @@ export async function sendInvestorWelcome(email: string, name?: string | null) {
 export async function sendWaitlistWelcome(email: string, name?: string | null) {
   if (!SENDGRID_API_KEY) return;
 
-  const firstName = name?.split(" ")[0] || "";
+  // Same header-injection protection as sendInvestorWelcome — see note there.
+  const rawFirstName = sanitizeHeader(name?.split(" ")[0] || "", 60);
+  const firstName = escapeHtml(rawFirstName);
   const greeting = firstName ? `Hey ${firstName}` : "Hey";
 
   const sgMail = await getSgMail();
