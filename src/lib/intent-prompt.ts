@@ -34,27 +34,21 @@ Return JSON:
 
 If the conversation is purely casual with zero actionable content: { "reasoning": "...", "intents": [] }`;
 
-  const recentActionsText =
+  const recentActionsBlock =
     recentActions.length > 0
-      ? `Already captured this session — skip duplicates:
-${recentActions.map((a, i) => `  ${i + 1}. ${a}`).join('
-')}`
-      : 'None yet.';
+      ? "Already captured this session — skip duplicates:\n" + recentActions.map((a, i) => `  ${i + 1}. ${a}`).join("\n")
+      : "None yet.";
 
-  const crossSessionText =
+  const crossSessionBlock =
     crossSessionContext.length > 0
-      ? `
-From earlier conversations today:
-${crossSessionContext.map((a, i) => `  ${i + 1}. ${a}`).join('
-')}
-Use this context to detect follow-ups, avoid duplicates, and understand ongoing threads.`
-      : '';
+      ? "\nFrom earlier conversations today:\n" + crossSessionContext.map((a, i) => `  ${i + 1}. ${a}`).join("\n") + "\nUse this context to detect follow-ups, avoid duplicates, and understand ongoing threads."
+      : "";
 
   const user = `${transcript}
 
 ---
 Current local time: ${localTime} (${timezone})
-Recent actions: ${recentActionsText}${crossSessionText}
+Recent actions: ${recentActionsBlock}${crossSessionBlock}
 
 Extract all actionable items. Reason briefly, then output JSON.`;
 
