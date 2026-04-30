@@ -22,7 +22,7 @@ function PasswordGate({ children }: { children: React.ReactNode }) {
         <p style={{ color: "#8A8A8A", fontSize: 14, marginBottom: 32 }}>Internal — Enter access code</p>
         <form onSubmit={(e) => {
           e.preventDefault();
-          if (input === "123") {
+          if (input === (process.env.NEXT_PUBLIC_INTERNAL_CODE || "anticipy2026")) {
             sessionStorage.setItem("anticipy_internal", "1");
             setUnlocked(true);
           } else {
