@@ -12,6 +12,21 @@ interface IntentNotification {
   actionType: string;
 }
 
+type Importance = "critical" | "important" | "standard" | "low";
+
+function importanceLabel(importance: string): { label: string; color: string } {
+  switch (importance as Importance) {
+    case "critical":
+      return { label: "Critical", color: "#FF6B6B" };
+    case "important":
+      return { label: "Important", color: "#F0A04B" };
+    case "standard":
+      return { label: "Standard", color: "#C8A97E" };
+    default:
+      return { label: "Low", color: "#8A8A8A" };
+  }
+}
+
 export async function sendIntentEmail(
   toEmail: string,
   intent: IntentNotification,
@@ -22,14 +37,9 @@ export async function sendIntentEmail(
   const confirmUrl = `${baseUrl}/api/engine/confirm?intentId=${safeIntentId}&action=yes`;
   const rejectUrl = `${baseUrl}/api/engine/confirm?intentId=${safeIntentId}&action=no`;
 
-  const importanceBadge =
-    intent.importance === "critical"
-      ? "🔴 CRITICAL"
-      : intent.importance === "important"
-        ? "🟠 Important"
-        : intent.importance === "standard"
-          ? "🟡 Standard"
-          : "⚪ Low";
+  const { label: importanceText, color: importanceColor } = importanceLabel(
+    intent.importance
+  );
 
   const rawSubject = subjectPrefix
     ? `${subjectPrefix} Anticipy: ${intent.summary}`
@@ -38,37 +48,37 @@ export async function sendIntentEmail(
 
   const safeSummary = escapeHtml(intent.summary);
   const safeQuote = escapeHtml(intent.evidenceQuote);
+  const safePreheader = escapeHtml(
+    `${importanceText} · ${intent.summary}`.slice(0, 140)
+  );
+
+  const html = buildHtml({
+    safeSummary,
+    safeQuote,
+    safePreheader,
+    importanceText,
+    importanceColor,
+    confirmUrl,
+    rejectUrl,
+  });
+
+  const text = buildText({
+    summary: intent.summary,
+    evidenceQuote: intent.evidenceQuote,
+    importanceText,
+    confirmUrl,
+    rejectUrl,
+  });
 
   const { data, error } = await resend.emails.send({
     from: FROM_EMAIL,
     to: toEmail,
     subject,
-    html: `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 500px; margin: 0 auto; background: #0C0C0C; color: #FAFAFA; padding: 32px; border-radius: 16px;">
-        <div style="margin-bottom: 24px;">
-          <span style="font-family: Georgia, serif; font-size: 20px; color: #C8A97E;">Anticipy</span>
-          <span style="float: right; font-size: 12px; padding: 4px 10px; border-radius: 20px; background: rgba(200,169,126,0.15); color: #C8A97E;">${importanceBadge}</span>
-        </div>
-
-        <p style="font-size: 14px; color: #8A8A8A; margin-bottom: 8px;">I heard you mention:</p>
-        <blockquote style="border-left: 3px solid #C8A97E; padding-left: 16px; margin: 0 0 24px 0; font-style: italic; color: #FAFAFA;">
-          "${safeQuote}"
-        </blockquote>
-
-        <p style="font-size: 16px; margin-bottom: 24px; color: #FAFAFA;">
-          <strong>${safeSummary}</strong>
-        </p>
-
-        <div style="display: flex; gap: 12px; margin-bottom: 24px;">
-          <a href="${confirmUrl}" style="display: inline-block; padding: 12px 32px; background: #C8A97E; color: #0C0C0C; text-decoration: none; border-radius: 100px; font-weight: 600; font-size: 15px;">Yes, do it</a>
-          <a href="${rejectUrl}" style="display: inline-block; padding: 12px 32px; background: #252525; color: #8A8A8A; text-decoration: none; border-radius: 100px; font-weight: 500; font-size: 15px;">Skip</a>
-        </div>
-
-        <p style="font-size: 12px; color: #5A5A5A;">
-          Tap a button above to confirm or skip — Anticipy will handle the rest.
-        </p>
-      </div>
-    `,
+    html,
+    text,
+    headers: {
+      "X-Entity-Ref-ID": intent.intentId,
+    },
   });
 
   if (error) {
@@ -77,4 +87,117 @@ export async function sendIntentEmail(
   }
 
   return data;
+}
+
+interface HtmlArgs {
+  safeSummary: string;
+  safeQuote: string;
+  safePreheader: string;
+  importanceText: string;
+  importanceColor: string;
+  confirmUrl: string;
+  rejectUrl: string;
+}
+
+function buildHtml(a: HtmlArgs): string {
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="dark light">
+<meta name="supported-color-schemes" content="dark light">
+<title>Anticipy</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0C0C0C;color:#FAFAFA;-webkit-font-smoothing:antialiased;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;color:#0C0C0C;">${a.safePreheader}</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#0C0C0C;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="520" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;width:100%;background-color:#111111;border:1px solid #1F1F1F;border-radius:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+        <tr>
+          <td style="padding:28px 32px 0 32px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td align="left" style="font-family:Georgia,'Times New Roman',serif;font-size:20px;letter-spacing:0.02em;color:#C8A97E;">Anticipy</td>
+                <td align="right" style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${a.importanceColor};font-weight:600;">${a.importanceText}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 0 32px;font-size:13px;color:#8A8A8A;line-height:1.4;">I heard you mention</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 32px 0 32px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td style="border-left:3px solid #C8A97E;padding:4px 0 4px 14px;font-style:italic;font-size:15px;line-height:1.5;color:#E8E8E8;">&ldquo;${a.safeQuote}&rdquo;</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 0 32px;font-size:17px;line-height:1.45;color:#FAFAFA;font-weight:600;">${a.safeSummary}</td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px 0 32px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td bgcolor="#C8A97E" style="border-radius:100px;mso-padding-alt:0;">
+                  <a href="${a.confirmUrl}" style="display:inline-block;padding:12px 28px;color:#0C0C0C;text-decoration:none;font-weight:600;font-size:14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;border-radius:100px;line-height:1;">Yes, do it</a>
+                </td>
+                <td style="width:10px;font-size:0;line-height:0;">&nbsp;</td>
+                <td bgcolor="#1F1F1F" style="border-radius:100px;mso-padding-alt:0;">
+                  <a href="${a.rejectUrl}" style="display:inline-block;padding:12px 28px;color:#A8A8A8;text-decoration:none;font-weight:500;font-size:14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;border-radius:100px;line-height:1;">Skip</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 32px 0 32px;font-size:12px;line-height:1.5;color:#5A5A5A;">Tap a button above and Anticipy will handle the rest. Links expire after the first tap.</td>
+        </tr>
+        <tr>
+          <td style="padding:28px 32px 28px 32px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td style="border-top:1px solid #1F1F1F;padding-top:18px;font-size:11px;line-height:1.5;color:#5A5A5A;">
+                  Sent because you wear Anticipy. <a href="${a.confirmUrl.split("/api/")[0]}/engine" style="color:#8A8A8A;text-decoration:underline;">Open the dashboard</a>.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+}
+
+interface TextArgs {
+  summary: string;
+  evidenceQuote: string;
+  importanceText: string;
+  confirmUrl: string;
+  rejectUrl: string;
+}
+
+function buildText(a: TextArgs): string {
+  return [
+    `Anticipy — ${a.importanceText}`,
+    "",
+    "I heard you mention:",
+    `  "${a.evidenceQuote}"`,
+    "",
+    a.summary,
+    "",
+    `Yes, do it:  ${a.confirmUrl}`,
+    `Skip:        ${a.rejectUrl}`,
+    "",
+    "Links expire after the first tap.",
+  ].join("\n");
 }
