@@ -774,6 +774,11 @@ export default function EnginePage() {
         const newOnes = (analyzeData.intents ?? []).filter((i: Intent) => !existingIds.has(i.id));
         return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
       });
+      // Clear any stale error from earlier in the recording (e.g. a Deepgram
+      // drop) — the analysis succeeded so the prior warning is no longer
+      // accurate, otherwise the "Done." state would render with a stale
+      // "transcription dropped" message.
+      setError("");
       setState("done");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Analysis failed";
