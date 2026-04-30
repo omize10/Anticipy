@@ -92,11 +92,18 @@ export default function AdminDashboard() {
   };
 
   const handleExport = () => {
+    // Escape per RFC 4180: wrap each cell in quotes, and double any embedded
+    // quote. Without this, an email or note containing a quote or comma
+    // breaks the row alignment in Excel/Sheets.
+    const cell = (v: string | null | undefined) =>
+      `"${(v ?? "").replace(/"/g, '""')}"`;
+
     const csv = [
       "Email,Source,Referrer,Created At,Notes",
-      ...entries.map(
-        (e) =>
-          `"${e.email}","${e.source}","${e.referrer || ""}","${e.created_at}","${e.notes || ""}"`
+      ...entries.map((e) =>
+        [e.email, e.source, e.referrer, e.created_at, e.notes]
+          .map(cell)
+          .join(",")
       ),
     ].join("\n");
 
@@ -106,6 +113,7 @@ export default function AdminDashboard() {
     a.href = url;
     a.download = `anticipy-waitlist-${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleLogout = async () => {
