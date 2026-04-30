@@ -5,6 +5,14 @@ import { requireSupabaseUser } from "@/lib/require-auth";
 
 export const dynamic = "force-dynamic";
 
+// Cap a single batch upload at ~50 MB. At 16 kHz mono opus that's roughly
+// 70 minutes — well past any normal recording. Keeps a malicious or buggy
+// client from ballooning the function memory budget.
+const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
+// Cap the number of segments stored from the JSON path so a misbehaving
+// client can't insert millions of rows in a single request.
+const MAX_SEGMENTS_PER_REQUEST = 10_000;
+
 export async function POST(req: Request) {
   const user = await requireSupabaseUser(req);
   if (!user) {
@@ -17,8 +25,17 @@ export async function POST(req: Request) {
     // JSON path: store pre-transcribed segments from streaming
     if (contentType.includes("application/json")) {
       const { sessionId, segments } = await req.json();
-      if (!sessionId || !segments?.length) {
+      if (!sessionId || typeof sessionId !== "string") {
+        return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+      }
+      if (!Array.isArray(segments) || segments.length === 0) {
         return NextResponse.json({ ok: true });
+      }
+      if (segments.length > MAX_SEGMENTS_PER_REQUEST) {
+        return NextResponse.json(
+          { error: "Too many segments in a single request." },
+          { status: 413 }
+        );
       }
 
       const { error: insertError } = await supabaseAdmin
@@ -28,7 +45,7 @@ export async function POST(req: Request) {
           speaker_id: s.speaker_id ?? 0,
           start_time: s.start_time ?? 0,
           end_time: s.end_time ?? 0,
-          text: s.text ?? "",
+          text: typeof s.text === "string" ? s.text.slice(0, 5000) : "",
           is_final: true,
         })));
 
@@ -49,6 +66,15 @@ export async function POST(req: Request) {
     }
     if (!sessionId) {
       return NextResponse.json({ error: "No sessionId" }, { status: 400 });
+    }
+    if (audioFile.size > MAX_AUDIO_BYTES) {
+      return NextResponse.json(
+        {
+          error:
+            "Audio too large. Please record a shorter clip — max 50 MB per upload.",
+        },
+        { status: 413 }
+      );
     }
 
     const buffer = Buffer.from(await audioFile.arrayBuffer());
