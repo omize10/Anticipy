@@ -24,7 +24,7 @@ from app.router import classify, handle_chat, handle_question, needs_clarificati
 from app.agent import execute_task
 from app.models import CostTracker
 from app.planner import plan_task
-from app.safety import check_blocked, sanitize_input
+from app.safety import check_blocked, block_reason, sanitize_input
 from app.config import (
     MAX_INPUT_LENGTH,
     MAX_SECONDS,
@@ -33,6 +33,10 @@ from app.config import (
     REQUIRED_ENV_VARS,
     MODEL_CHAIN,
     ENGINE_INTERNAL_TOKEN,
+    WS_MAX_MESSAGES_PER_MINUTE,
+    WS_MAX_MESSAGE_BYTES,
+    WS_REQUIRE_AUTH,
+    IS_PRODUCTION,
 )
 from app import supabase_client
 import os
@@ -41,8 +45,31 @@ logger = logging.getLogger("engine")
 
 
 # --- Rate limiting state ---
-# Maps user_id -> list of task timestamps
+# Bounded so a flood of distinct user_ids can't exhaust memory.
+_RATE_LIMIT_MAX_USERS = 50_000
 _task_timestamps: dict[str, list[float]] = defaultdict(list)
+_last_rate_cleanup: float = 0.0
+
+
+def _cleanup_rate_state() -> None:
+    """Periodic sweep so dead user_ids stop accumulating."""
+    global _last_rate_cleanup
+    now = time.time()
+    if now - _last_rate_cleanup < 300:  # at most every 5 min
+        return
+    _last_rate_cleanup = now
+    day_ago = now - 86400
+    stale = [uid for uid, ts in _task_timestamps.items() if not ts or max(ts) < day_ago]
+    for uid in stale:
+        _task_timestamps.pop(uid, None)
+    if len(_task_timestamps) > _RATE_LIMIT_MAX_USERS:
+        # Drop oldest by most-recent-timestamp until we're back under cap
+        sorted_uids = sorted(
+            _task_timestamps.items(),
+            key=lambda kv: max(kv[1]) if kv[1] else 0,
+        )
+        for uid, _ in sorted_uids[: len(_task_timestamps) - _RATE_LIMIT_MAX_USERS]:
+            _task_timestamps.pop(uid, None)
 
 
 def _check_task_rate_limit(user_id: str) -> str | None:
@@ -50,6 +77,7 @@ def _check_task_rate_limit(user_id: str) -> str | None:
     Check task rate limits per user.
     Returns an error message string if rate-limited, None if OK.
     """
+    _cleanup_rate_state()
     now = time.time()
     timestamps = _task_timestamps.get(user_id, [])
 
@@ -72,6 +100,40 @@ def _check_task_rate_limit(user_id: str) -> str | None:
 def _record_task(user_id: str) -> None:
     """Record a task execution for rate limiting."""
     _task_timestamps[user_id].append(time.time())
+
+
+# --- WebSocket message-rate state (per-IP) ---
+_ws_msg_timestamps: dict[str, list[float]] = defaultdict(list)
+_WS_MSG_MAX_IPS = 10_000
+_last_ws_cleanup: float = 0.0
+
+
+def _check_ws_msg_rate(ip: str) -> bool:
+    """
+    Bucketed WebSocket message rate limit per IP.
+    Returns True if the caller should be throttled.
+    """
+    global _last_ws_cleanup
+    now = time.time()
+    minute_ago = now - 60
+
+    if now - _last_ws_cleanup > 120:
+        _last_ws_cleanup = now
+        stale = [k for k, ts in _ws_msg_timestamps.items() if not ts or max(ts) < minute_ago]
+        for k in stale:
+            _ws_msg_timestamps.pop(k, None)
+        if len(_ws_msg_timestamps) > _WS_MSG_MAX_IPS:
+            sorted_ips = sorted(
+                _ws_msg_timestamps.items(),
+                key=lambda kv: max(kv[1]) if kv[1] else 0,
+            )
+            for k, _ in sorted_ips[: len(_ws_msg_timestamps) - _WS_MSG_MAX_IPS]:
+                _ws_msg_timestamps.pop(k, None)
+
+    bucket = [ts for ts in _ws_msg_timestamps.get(ip, []) if ts > minute_ago]
+    bucket.append(now)
+    _ws_msg_timestamps[ip] = bucket
+    return len(bucket) > WS_MAX_MESSAGES_PER_MINUTE
 
 
 # --- Startup stats ---
@@ -193,10 +255,16 @@ async def get_current_user(token: str) -> dict:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from request."""
+    """Extract client IP from request, trusting x-forwarded-for only behind a proxy."""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # Take the left-most (original client) and strip whitespace.
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -205,10 +273,23 @@ def _get_client_ip(request: Request) -> str:
 async def signup(req: AuthRequest):
     if not req.username or not req.password:
         return AuthResponse(success=False, message=msg.AUTH_MISSING_FIELDS)
-    if len(req.password) < 6:
-        return AuthResponse(success=False, message="Password must be at least 6 characters.")
 
-    result = await auth_module.signup(req.username.strip(), req.password)
+    # Defensive bounds before we touch the DB.
+    u_err = auth_module.validate_username(req.username)
+    if u_err:
+        return AuthResponse(success=False, message=msg.AUTH_USERNAME_INVALID)
+    p_err = auth_module.validate_password(req.password)
+    if p_err == "too_short":
+        return AuthResponse(success=False, message=msg.AUTH_PASSWORD_TOO_SHORT)
+    if p_err == "too_long":
+        return AuthResponse(success=False, message=msg.AUTH_PASSWORD_TOO_LONG)
+
+    try:
+        result = await auth_module.signup(req.username.strip(), req.password)
+    except Exception:
+        logger.exception("signup error")
+        return AuthResponse(success=False, message=msg.CONNECTION_ERROR)
+
     if result["success"]:
         return AuthResponse(
             success=True,
@@ -216,8 +297,15 @@ async def signup(req: AuthRequest):
             user_id=result["user_id"],
             message=msg.AUTH_SIGNUP_SUCCESS,
         )
-    if result.get("error") == "exists":
+    err = result.get("error", "")
+    if err == "exists":
         return AuthResponse(success=False, message=msg.AUTH_USER_EXISTS)
+    if err == "username":
+        return AuthResponse(success=False, message=msg.AUTH_USERNAME_INVALID)
+    if err == "password_too_short":
+        return AuthResponse(success=False, message=msg.AUTH_PASSWORD_TOO_SHORT)
+    if err == "password_too_long":
+        return AuthResponse(success=False, message=msg.AUTH_PASSWORD_TOO_LONG)
     return AuthResponse(success=False, message=msg.CONNECTION_ERROR)
 
 
@@ -226,13 +314,22 @@ async def login(req: AuthRequest, request: Request):
     if not req.username or not req.password:
         return AuthResponse(success=False, message=msg.AUTH_MISSING_FIELDS)
 
+    # Don't even hit the DB for obviously malformed input.
+    if len(req.username) > 256 or len(req.password) > 1024:
+        return AuthResponse(success=False, message=msg.AUTH_INVALID_CREDENTIALS)
+
     client_ip = _get_client_ip(request)
 
     # Check rate limit (V17)
     if auth_module.check_login_rate_limit(client_ip):
         return AuthResponse(success=False, message=msg.AUTH_RATE_LIMITED)
 
-    result = await auth_module.login(req.username.strip(), req.password, ip=client_ip)
+    try:
+        result = await auth_module.login(req.username.strip(), req.password, ip=client_ip)
+    except Exception:
+        logger.exception("login error")
+        return AuthResponse(success=False, message=msg.CONNECTION_ERROR)
+
     if result["success"]:
         return AuthResponse(
             success=True,
@@ -260,11 +357,26 @@ async def health():
 
 # --- Admin stats endpoint (V66) ---
 @app.get("/stats")
-async def stats(token: str):
-    """Admin monitoring endpoint. Requires valid auth token."""
-    payload = auth_module.verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail=msg.AUTH_TOKEN_INVALID)
+async def stats(request: Request, token: str | None = None):
+    """
+    Admin monitoring endpoint.
+
+    Auth modes (any one):
+      - X-Engine-Token header matching ENGINE_INTERNAL_TOKEN
+      - JWT token (in `token` query param) for a username on the admin allow-list
+    """
+    # Server-to-server bypass for ops dashboards
+    server_token = request.headers.get("x-engine-token")
+    if server_token and ENGINE_INTERNAL_TOKEN and server_token == ENGINE_INTERNAL_TOKEN:
+        pass
+    else:
+        if not token:
+            raise HTTPException(status_code=401, detail=msg.AUTH_TOKEN_INVALID)
+        payload = auth_module.verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail=msg.AUTH_TOKEN_INVALID)
+        if not auth_module.is_admin(payload.get("username")):
+            raise HTTPException(status_code=403, detail="forbidden")
 
     uptime = time.time() - _start_time if _start_time else 0
     return {
@@ -272,6 +384,7 @@ async def stats(token: str):
         "total_tasks": _total_tasks,
         "total_errors": _total_errors,
         "models_configured": len(MODEL_CHAIN),
+        "active_rate_limited_users": len(_task_timestamps),
     }
 
 
@@ -308,15 +421,25 @@ async def execute_intent_endpoint(req: ExecuteIntentRequest, request: Request):
     if not req.task or not req.task.strip():
         raise HTTPException(status_code=400, detail="task is required")
 
+    if len(req.task) > MAX_INPUT_LENGTH:
+        raise HTTPException(status_code=400, detail="task is too long")
+
     task_text = sanitize_input(req.task.strip())
     if not task_text:
         raise HTTPException(status_code=400, detail="task text is empty after sanitization")
 
-    if check_blocked(task_text):
+    reason = block_reason(task_text)
+    if reason:
+        if reason == "password":
+            block_msg = msg.PASSWORD_REQUEST_BLOCKED
+        elif reason == "financial":
+            block_msg = msg.FINANCIAL_TRANSACTION_BLOCKED
+        else:
+            block_msg = msg.BLOCKED_ACTION
         return {
             "success": False,
-            "message": "This action is not permitted.",
-            "data": {},
+            "message": block_msg,
+            "data": {"reason": reason},
             "plan": "",
         }
 
@@ -452,11 +575,27 @@ async def execute_intent_endpoint(req: ExecuteIntentRequest, request: Request):
     }
 
 
+# --- WebSocket helpers ---
+def _ws_client_ip(websocket: WebSocket) -> str:
+    """Extract caller IP from a WebSocket, preferring x-forwarded-for."""
+    forwarded = websocket.headers.get("x-forwarded-for")
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    real = websocket.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    return websocket.client.host if websocket.client else "unknown"
+
+
 # --- WebSocket task execution ---
 @app.websocket("/ws/task")
 async def ws_task(websocket: WebSocket):
     global _total_tasks, _total_errors
     await websocket.accept()
+
+    client_ip = _ws_client_ip(websocket)
 
     # Confirmation channel: agent blocks on this when it needs user input
     confirm_event = asyncio.Event()
@@ -480,6 +619,7 @@ async def ws_task(websocket: WebSocket):
         return confirm_value[0]
 
     user_id: str | None = None
+    username: str | None = None
     task_running = False
     bg_task: asyncio.Task | None = None
 
@@ -489,31 +629,62 @@ async def ws_task(websocket: WebSocket):
         payload = auth_module.verify_token(query_token)
         if payload:
             user_id = payload["user_id"]
+            username = payload.get("username")
+
+    if WS_REQUIRE_AUTH and not user_id:
+        await send_msg({"type": "error", "message": msg.AUTH_REQUIRED})
+        try:
+            await websocket.close(code=4401)
+        except Exception:
+            pass
+        return
 
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # Per-IP message-rate guard.  Don't accept anything from a flooder.
+            if _check_ws_msg_rate(client_ip):
+                await send_msg({"type": "error", "message": msg.RATE_LIMIT_WS})
+                continue
+
+            # Frame size guard
+            if raw is None or len(raw) > WS_MAX_MESSAGE_BYTES:
+                await send_msg({"type": "error", "message": msg.INPUT_INVALID})
+                continue
+
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
-                await send_msg({"type": "error", "message": msg.CONNECTION_ERROR})
+                await send_msg({"type": "error", "message": msg.INPUT_INVALID})
+                continue
+
+            if not isinstance(data, dict):
+                await send_msg({"type": "error", "message": msg.INPUT_INVALID})
                 continue
 
             msg_type = data.get("type", "")
 
             # --- Authentication (optional, via token field in message body) ---
             if "token" in data and not user_id:
-                payload = auth_module.verify_token(data["token"])
-                if payload:
-                    user_id = payload["user_id"]
+                tok = data.get("token")
+                if isinstance(tok, str):
+                    payload = auth_module.verify_token(tok)
+                    if payload:
+                        user_id = payload["user_id"]
+                        username = payload.get("username")
 
             # --- Start task ---
             if msg_type == "start":
                 if task_running:
-                    await send_msg({"type": "error", "message": msg.CONNECTION_ERROR})
+                    await send_msg({"type": "error", "message": msg.TASK_ALREADY_RUNNING})
                     continue
 
-                text = data.get("text", "").strip()
+                raw_text = data.get("text", "")
+                if not isinstance(raw_text, str):
+                    await send_msg({"type": "error", "message": msg.INPUT_INVALID})
+                    continue
+                text = raw_text.strip()
                 if not text:
                     await send_msg({"type": "error", "message": msg.AMBIGUOUS_REQUEST})
                     continue
@@ -529,13 +700,20 @@ async def ws_task(websocket: WebSocket):
                     await send_msg({"type": "error", "message": msg.AMBIGUOUS_REQUEST})
                     continue
 
-                # Safety check FIRST — before classification
-                if check_blocked(text):
-                    await send_msg({"type": "complete", "message": msg.BLOCKED_ACTION})
+                # Safety check FIRST — before classification, with category-aware messages
+                reason = block_reason(text)
+                if reason:
+                    if reason == "password":
+                        block_msg = msg.PASSWORD_REQUEST_BLOCKED
+                    elif reason == "financial":
+                        block_msg = msg.FINANCIAL_TRANSACTION_BLOCKED
+                    else:
+                        block_msg = msg.BLOCKED_ACTION
+                    await send_msg({"type": "complete", "message": block_msg})
                     continue
 
                 # Rate limiting on task creation (V18)
-                rate_user = user_id or "anonymous"
+                rate_user = user_id or f"anon:{client_ip}"
                 rate_error = _check_task_rate_limit(rate_user)
                 if rate_error:
                     await send_msg({"type": "error", "message": rate_error})
@@ -543,15 +721,27 @@ async def ws_task(websocket: WebSocket):
 
                 # Classify intent
                 tracker = CostTracker()
-                category = await classify(text, tracker)
+                try:
+                    category = await classify(text, tracker)
+                except Exception:
+                    logger.exception("classify error")
+                    category = "ambiguous"
 
                 if category == "chat":
-                    response = await handle_chat(text, tracker)
+                    try:
+                        response = await handle_chat(text, tracker)
+                    except Exception:
+                        logger.exception("handle_chat error")
+                        response = msg.CONNECTION_ERROR
                     await send_msg({"type": "complete", "message": response})
                     continue
 
                 if category == "question":
-                    answer = await handle_question(text, tracker)
+                    try:
+                        answer = await handle_question(text, tracker)
+                    except Exception:
+                        logger.exception("handle_question error")
+                        answer = msg.CONNECTION_ERROR
                     await send_msg({"type": "complete", "message": answer})
                     continue
 
@@ -561,8 +751,7 @@ async def ws_task(websocket: WebSocket):
 
                 # category == "action"
                 # Ask one clarifying question up front for vague requests so we
-                # don't burn a 30-second browser session and fail. The user can
-                # reply with the missing details and re-issue the task.
+                # don't burn a 30-second browser session and fail.
                 clarification = needs_clarification(text)
                 if clarification:
                     await send_msg({"type": "complete", "message": clarification})
@@ -573,21 +762,24 @@ async def ws_task(websocket: WebSocket):
 
                 # Run the agent in the background
                 task_running = True
+                # Snapshot user_id at task-start time so it can't change underneath us.
+                task_user_id = user_id
 
-                async def run_task():
+                async def run_task(text_: str = text, uid: str | None = task_user_id):
                     nonlocal task_running
                     global _total_errors
                     try:
                         await execute_task(
-                            goal=text,
+                            goal=text_,
                             send=send_msg,
                             receive_confirmation=receive_confirmation,
-                            user_id=user_id,
+                            user_id=uid,
                         )
                     except asyncio.CancelledError:
                         raise
                     except Exception:
                         _total_errors += 1
+                        logger.exception("agent task crashed")
                         await send_msg({"type": "error", "message": msg.CONNECTION_ERROR})
                     finally:
                         task_running = False
@@ -597,15 +789,25 @@ async def ws_task(websocket: WebSocket):
             # --- Confirmation / continue ---
             elif msg_type in ("confirm", "continue"):
                 value = data.get("value", data.get("text", "continue"))
-                confirm_value[0] = str(value)
+                if not isinstance(value, str):
+                    value = "continue"
+                # Bound the confirmation payload too
+                confirm_value[0] = value[:1024]
                 confirm_event.set()
 
+            elif msg_type == "cancel":
+                # Allow the client to abort an in-flight task explicitly.
+                if bg_task is not None and not bg_task.done():
+                    bg_task.cancel()
+                    await send_msg({"type": "status", "message": msg.TASK_INTERRUPTED})
+
             else:
-                await send_msg({"type": "error", "message": msg.CONNECTION_ERROR})
+                await send_msg({"type": "error", "message": msg.INPUT_INVALID})
 
     except WebSocketDisconnect:
         pass
     except Exception:
+        logger.exception("ws_task error")
         try:
             await websocket.close()
         except Exception:

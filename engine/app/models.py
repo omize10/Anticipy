@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -14,6 +15,9 @@ from dataclasses import dataclass, field
 import httpx
 
 from app.config import MODEL_CHAIN, MAX_COST_USD
+
+
+logger = logging.getLogger("engine")
 
 
 @dataclass
@@ -199,9 +203,15 @@ async def _call_openai_compatible(
         resp = await client.post(url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
-        text = data["choices"][0]["message"]["content"]
-        usage = data.get("usage", {})
-        return text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+        choices = data.get("choices") or []
+        if not choices:
+            return "", 0, 0
+        message = choices[0].get("message") or {}
+        text = message.get("content") or ""
+        if not isinstance(text, str):
+            text = str(text)
+        usage = data.get("usage") or {}
+        return text, int(usage.get("prompt_tokens", 0) or 0), int(usage.get("completion_tokens", 0) or 0)
 
 
 async def _call_gemini(
@@ -213,14 +223,24 @@ async def _call_gemini(
     max_tokens: int = 256,
 ) -> tuple[str, int, int]:
     """Call Google Gemini REST API. Returns (text, input_tokens, output_tokens)."""
-    url = f"{base_url}/models/{model}:generateContent?key={api_key}"
+    # The API key is passed via header rather than the URL so it doesn't leak
+    # into proxy logs.  (Gemini accepts both forms.)
+    url = f"{base_url}/models/{model}:generateContent"
+    headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
 
     # Convert OpenAI-style messages to Gemini contents format
     contents = []
     system_text = ""
-    for msg in messages:
-        role = msg["role"]
-        text = msg["content"]
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role", "user")
+        text = m.get("content", "")
+        if not isinstance(text, str):
+            text = str(text)
         if role == "system":
             system_text = text
             continue
@@ -242,15 +262,21 @@ async def _call_gemini(
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(url, json=body)
+        resp = await client.post(url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-        usage = data.get("usageMetadata", {})
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return "", 0, 0
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        text = parts[0].get("text", "") if parts else ""
+        if not isinstance(text, str):
+            text = str(text)
+        usage = data.get("usageMetadata") or {}
         return (
             text,
-            usage.get("promptTokenCount", 0),
-            usage.get("candidatesTokenCount", 0),
+            int(usage.get("promptTokenCount", 0) or 0),
+            int(usage.get("candidatesTokenCount", 0) or 0),
         )
 
 
@@ -293,12 +319,19 @@ async def llm_call(
     If require_json=True, uses 5-strategy JSON parsing, returning a dict.
     Otherwise returns raw text.
     Returns None only if every model in the chain fails.
+
+    Errors never propagate — they're logged at debug level and we move to the
+    next model so callers don't see backend-specific stack traces.
     """
     if tracker.exceeded:
+        return None
+    if not MODEL_CHAIN:
         return None
 
     for model_cfg in MODEL_CHAIN:
         for attempt in range(retries_per_model):
+            if tracker.exceeded:
+                return None
             try:
                 text, in_tok, out_tok = await _call_model(
                     model_cfg, messages, temperature, max_tokens
@@ -321,9 +354,25 @@ async def llm_call(
                     # Last attempt on this model — try next model
                     break
                 else:
-                    return text.strip()
+                    return text.strip() if text else ""
 
+            except httpx.HTTPStatusError as e:
+                # 4xx (other than 429): client error, no point retrying this model.
+                status = e.response.status_code if e.response is not None else 0
+                logger.debug("LLM %s HTTP %s", model_cfg.get("name"), status)
+                if status == 429:
+                    if attempt < retries_per_model - 1:
+                        await asyncio.sleep(2.0 * (attempt + 1))
+                        continue
+                # Move to next model
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
+                if attempt < retries_per_model - 1:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                break
             except Exception:
+                logger.debug("LLM %s call failed", model_cfg.get("name"), exc_info=True)
                 if attempt < retries_per_model - 1:
                     await asyncio.sleep(1.0 * (attempt + 1))
                     continue

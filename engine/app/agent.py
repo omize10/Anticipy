@@ -10,11 +10,14 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import tempfile
 import time
+import uuid
 from typing import Callable, Awaitable
 from urllib.parse import urlparse
 
-from browser_use import Agent, BrowserSession, BrowserProfile, AgentHistoryList
+from browser_use import Agent, BrowserSession, AgentHistoryList
 
 from app.config import (
     MAX_STEPS,
@@ -22,7 +25,12 @@ from app.config import (
     PROFILE_ENCRYPTION_KEY,
     BROWSER_PROFILE_BASE,
 )
-from app.safety import check_blocked, check_needs_confirmation, sanitize_input
+from app.safety import (
+    check_blocked,
+    block_reason,
+    check_needs_confirmation,
+    sanitize_input,
+)
 from app.planner import plan_task
 from app.models import CostTracker
 from app import messages as msg
@@ -270,6 +278,10 @@ class EngineAgent:
         self._start_time: float = 0.0
         self._stopped: bool = False
         self._login_notified: bool = False
+        self._closed: bool = False
+        # Profile dir created per-task for anonymous users so cookies don't leak
+        # across distinct anonymous callers; cleaned up in _close().
+        self._ephemeral_profile_dir: str | None = None
 
     async def _on_step(self, browser_state, agent_output, step_num) -> None:
         """Callback fired after each Browser Use step. Streams status to user."""
@@ -355,21 +367,38 @@ class EngineAgent:
         self._last_status_time = self._start_time
 
         try:
-            # --- Safety check ---
-            if check_blocked(self.goal):
-                await _send_error(self.send, msg.BLOCKED_ACTION)
+            # --- Safety check (with category-aware messaging) ---
+            reason = block_reason(self.goal)
+            if reason:
+                if reason == "password":
+                    await _send_error(self.send, msg.PASSWORD_REQUEST_BLOCKED)
+                elif reason == "financial":
+                    await _send_error(self.send, msg.FINANCIAL_TRANSACTION_BLOCKED)
+                else:
+                    await _send_error(self.send, msg.BLOCKED_ACTION)
                 return
 
             # --- Plan (get starting URL) ---
             await _send_status(self.send, msg.TASK_STARTING)
-            plan = await plan_task(self.goal, self.tracker)
-            start_url = plan["url"]
+            try:
+                plan = await asyncio.wait_for(plan_task(self.goal, self.tracker), timeout=15)
+            except (asyncio.TimeoutError, Exception):
+                logger.exception("plan_task error")
+                plan = {"url": "https://www.google.com", "sub_goals": [self.goal], "success": ""}
+            start_url = plan.get("url") or "https://www.google.com"
 
             # --- Configure browser session ---
-            profile_dir = os.path.join(
-                BROWSER_PROFILE_BASE, self.user_id or "_anonymous"
-            )
-            os.makedirs(profile_dir, exist_ok=True)
+            # Authenticated users get a stable profile under BROWSER_PROFILE_BASE.
+            # Anonymous users get a fresh ephemeral dir per task so they never
+            # share cookies / sessions with each other.
+            if self.user_id:
+                profile_dir = os.path.join(BROWSER_PROFILE_BASE, self.user_id)
+                os.makedirs(profile_dir, exist_ok=True)
+            else:
+                self._ephemeral_profile_dir = tempfile.mkdtemp(
+                    prefix=f"engine_anon_{uuid.uuid4().hex[:8]}_"
+                )
+                profile_dir = self._ephemeral_profile_dir
 
             # Build chrome args for stealth and stability
             chrome_args = [
@@ -413,13 +442,31 @@ class EngineAgent:
             if self.user_id and domain:
                 cookies = await _load_cookies(self.user_id, domain)
 
-            # Start session and inject cookies before agent runs
-            await self._session.start()
-            if cookies and self._session._browser_context:
+            # Start session and inject cookies before agent runs.
+            # We try several Browser Use accessor names to stay version-tolerant
+            # rather than reaching for a private attribute.
+            try:
+                await self._session.start()
+            except Exception:
+                logger.exception("browser session start failed")
+                await _send_error(self.send, msg.BROWSER_ERROR)
+                return
+
+            if cookies:
                 try:
-                    await self._session._browser_context.add_cookies(cookies)
+                    add_cookies = getattr(self._session, "add_cookies", None)
+                    if callable(add_cookies):
+                        await add_cookies(cookies)
+                    else:
+                        ctx = (
+                            getattr(self._session, "browser_context", None)
+                            or getattr(self._session, "context", None)
+                            or getattr(self._session, "_browser_context", None)
+                        )
+                        if ctx is not None and hasattr(ctx, "add_cookies"):
+                            await ctx.add_cookies(cookies)
                 except Exception:
-                    pass
+                    logger.debug("cookie injection failed", exc_info=True)
 
             # --- Get LLM ---
             llm = _get_llm()
@@ -484,6 +531,7 @@ class EngineAgent:
 
         except asyncio.CancelledError:
             await _send_error(self.send, msg.TASK_INTERRUPTED)
+            raise
         except Exception:
             logger.exception("Agent execution error")
             # If we hit a login wall *and* errored, surface that instead of the
@@ -500,18 +548,41 @@ class EngineAgent:
             await self._close()
 
     async def _save_session_cookies(self, start_url: str) -> None:
-        """Save cookies from the current browser session."""
+        """Save cookies from the current browser session for an authenticated user."""
         if not self.user_id or not self._session:
             return
         try:
             domain = _get_domain(start_url)
-            # Also save cookies for current URL domain
-            current_url = await self._session.get_current_page_url()
+
+            # Get current URL via best-effort accessor probing
+            current_url = ""
+            for attr in ("get_current_page_url", "current_url", "url"):
+                try:
+                    val = getattr(self._session, attr, None)
+                    if callable(val):
+                        v = val()
+                        current_url = await v if asyncio.iscoroutine(v) else (v or "")
+                    elif val is not None:
+                        current_url = val if isinstance(val, str) else str(val)
+                    if current_url:
+                        break
+                except Exception:
+                    continue
             current_domain = _get_domain(current_url) if current_url else ""
 
-            cookies = await self._session.cookies()
-            if cookies and domain:
-                # Filter cookies for this domain
+            cookies_fn = getattr(self._session, "cookies", None)
+            cookies: list[dict] = []
+            try:
+                if callable(cookies_fn):
+                    result = cookies_fn()
+                    cookies = await result if asyncio.iscoroutine(result) else (result or [])
+            except Exception:
+                cookies = []
+
+            if not cookies:
+                return
+
+            if domain:
                 domain_cookies = [
                     c for c in cookies
                     if domain in (c.get("domain", "") or "")
@@ -519,7 +590,7 @@ class EngineAgent:
                 if domain_cookies:
                     await _save_cookies(self.user_id, domain, domain_cookies)
 
-            if current_domain and current_domain != domain and cookies:
+            if current_domain and current_domain != domain:
                 current_cookies = [
                     c for c in cookies
                     if current_domain in (c.get("domain", "") or "")
@@ -527,26 +598,31 @@ class EngineAgent:
                 if current_cookies:
                     await _save_cookies(self.user_id, current_domain, current_cookies)
         except Exception:
-            pass
+            logger.debug("save cookies failed", exc_info=True)
 
     async def _close(self) -> None:
-        """Close browser session."""
+        """Close browser session and clean up any ephemeral profile dir.  Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+
         try:
             if self._session:
                 await self._session.stop()
         except Exception:
-            pass
+            logger.debug("session.stop() raised", exc_info=True)
         self._session = None
+
+        # Clean up ephemeral anonymous profile so /tmp doesn't fill up.
+        if self._ephemeral_profile_dir:
+            try:
+                shutil.rmtree(self._ephemeral_profile_dir, ignore_errors=True)
+            except Exception:
+                pass
+            self._ephemeral_profile_dir = None
 
 
 # --- Technical leakage sanitization ---
-
-_BANNED_PATTERNS = [
-    "json", "api", "error", "model", "token", "null", "undefined",
-    "traceback", "timeout", "500", "429", "dom", "selector",
-    "accessibility", "xpath", "css", "javascript", "python",
-    "function", "debug", "console", "http", "endpoint", "exception",
-]
 
 
 def _sanitize_output(text: str) -> str:
@@ -633,14 +709,28 @@ async def execute_task(
     """
     Top-level entry point. Creates an EngineAgent and runs it
     with a hard timeout. Called by main.py WebSocket handler.
+
+    All exceptions are caught and reported to the user as a friendly message —
+    no stack traces or technical detail leak through.
     """
     agent = EngineAgent(goal, send, receive_confirmation, user_id)
     try:
         await asyncio.wait_for(agent.run(), timeout=MAX_SECONDS + 60)
     except asyncio.TimeoutError:
         await _send_error(send, msg.BUDGET_TIME_EXCEEDED)
+    except asyncio.CancelledError:
+        # Already surfaced inside run(); rethrow so callers can clean up.
+        raise
+    except Exception:
+        logger.exception("execute_task error")
+        await _send_error(send, msg.CONNECTION_ERROR)
     finally:
-        await agent._close()
+        # _close() is idempotent so calling it here on top of the run() finally
+        # is safe — it covers the wait_for-TimeoutError path too.
+        try:
+            await agent._close()
+        except Exception:
+            logger.debug("agent close raised", exc_info=True)
 
 
 # PHASE 2: User device fallback
