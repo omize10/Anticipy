@@ -153,9 +153,10 @@ function renderPage(title: string, message: string): string {
         : title === "Already Handled"
           ? "ℹ️"
           : "⚠️";
+  const safeTitle = escapeHtml(title);
   return `<!DOCTYPE html>
 <html>
-<head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Anticipy — ${title}</title></head>
+<head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Anticipy — ${safeTitle}</title></head>
 <body style="background:#0C0C0C;color:#FAFAFA;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
   <div style="text-align:center;max-width:400px;padding:40px;">
     <p style="font-size:48px;margin-bottom:16px;">${emoji}</p>

@@ -211,9 +211,6 @@ export async function POST(req: Request) {
       const allExisting = [...sessionExistingIntents, ...insertedThisCall];
       if (isDuplicateOfExisting(candidate, allExisting)) {
         skippedDuplicates += 1;
-        console.log(
-          `[dedup] Skipping duplicate intent: ${candidate.action_type} - ${candidate.summary_for_user.substring(0, 60)}`
-        );
         continue;
       }
 

@@ -14,6 +14,7 @@ import { supabaseAdmin } from "./supabase-admin";
 import { createCalendarEvent } from "./google-calendar";
 import { Resend } from "resend";
 import { sendSMS } from "./twilio-notify";
+import { escapeHtml } from "./escape";
 
 const resend = new Resend(process.env.RESEND_API_KEY ?? "re_placeholder");
 
@@ -396,15 +397,18 @@ export async function executeAction(
         if (recipientEmail?.includes("@")) {
           try {
             const senderHandle = userEmail.split("@")[0];
+            const safeSenderHandle = escapeHtml(senderHandle);
+            const rawBody = (params.body as string) || "";
+            const safeBodyHtml = escapeHtml(rawBody).replace(/\n/g, "<br>");
             const { data: sent, error: sendErr } = await resend.emails.send({
               from: `${senderHandle} via Anticipy <notifications@aevoy.com>`,
               to: recipientEmail,
               subject:
                 (params.subject as string) || "Message via Anticipy",
-              text: (params.body as string) || "",
-              html: `<p>${((params.body as string) || "").replace(/\n/g, "<br>")}</p>
+              text: rawBody,
+              html: `<p>${safeBodyHtml}</p>
                      <hr style="border:none;border-top:1px solid #eee;margin:16px 0">
-                     <p style="font-size:12px;color:#888">Sent via Anticipy on behalf of ${senderHandle}</p>`,
+                     <p style="font-size:12px;color:#888">Sent via Anticipy on behalf of ${safeSenderHandle}</p>`,
             });
 
             if (!sendErr) {
