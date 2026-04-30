@@ -237,7 +237,62 @@ export default function EnginePage() {
 
   // ── Engine handlers ─────────────────────────────────────────────────────────
 
+  // Tear down all recording resources and null refs so a fresh recording can be started cleanly.
+  // Safe to call multiple times.
+  const cleanupRecording = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = undefined;
+    }
+    if (autoAnalyzeTimerRef.current) {
+      clearInterval(autoAnalyzeTimerRef.current);
+      autoAnalyzeTimerRef.current = undefined;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = 0;
+    }
+    if (processorRef.current) {
+      try { processorRef.current.disconnect(); } catch { /* already disconnected */ }
+      processorRef.current = null;
+    }
+    if (dgSocketRef.current) {
+      try {
+        if (dgSocketRef.current.readyState === WebSocket.OPEN) {
+          dgSocketRef.current.close();
+        }
+      } catch { /* already closed */ }
+      dgSocketRef.current = null;
+    }
+    if (mediaRecorderRef.current) {
+      try {
+        if (mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      } catch { /* already stopped */ }
+      mediaRecorderRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => {
+        try { t.stop(); } catch { /* already stopped */ }
+      });
+      streamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try {
+        if (audioCtxRef.current.state !== "closed") {
+          audioCtxRef.current.close();
+        }
+      } catch { /* already closed */ }
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+    chunksRef.current = [];
+  }, []);
+
   const startRecording = useCallback(async () => {
+    // Defensive: ensure any prior session's resources are fully torn down before opening new ones
+    cleanupRecording();
     try {
       setError("");
       setSegments([]);
@@ -427,37 +482,70 @@ export default function EnginePage() {
       const message = err instanceof Error ? err.message : "Failed to start recording";
       setError(message);
       setState("error");
+      cleanupRecording();
     }
-  }, []);
+  }, [cleanupRecording]);
 
   const stopRecording = useCallback(async () => {
     if (!mediaRecorderRef.current) return;
 
     setState("processing");
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (autoAnalyzeTimerRef.current) clearInterval(autoAnalyzeTimerRef.current);
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = undefined;
+    }
+    if (autoAnalyzeTimerRef.current) {
+      clearInterval(autoAnalyzeTimerRef.current);
+      autoAnalyzeTimerRef.current = undefined;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = 0;
+    }
     setAudioLevel(0);
     setLiveText("");
 
     if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-      dgSocketRef.current.send(JSON.stringify({ type: "CloseStream" }));
+      try {
+        dgSocketRef.current.send(JSON.stringify({ type: "CloseStream" }));
+      } catch { /* socket may have closed mid-call */ }
       await new Promise((r) => setTimeout(r, 1000));
-      dgSocketRef.current.close();
+      try { dgSocketRef.current.close(); } catch { /* already closed */ }
     }
+    dgSocketRef.current = null;
 
-    if (processorRef.current) processorRef.current.disconnect();
+    if (processorRef.current) {
+      try { processorRef.current.disconnect(); } catch { /* already disconnected */ }
+      processorRef.current = null;
+    }
 
     const recorder = mediaRecorderRef.current;
     await new Promise<void>((resolve) => {
       recorder.onstop = () => resolve();
-      recorder.stop();
+      try {
+        if (recorder.state !== "inactive") recorder.stop();
+        else resolve();
+      } catch {
+        resolve();
+      }
     });
+    mediaRecorderRef.current = null;
 
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current.getTracks().forEach((t) => {
+        try { t.stop(); } catch { /* already stopped */ }
+      });
+      streamRef.current = null;
     }
-    if (audioCtxRef.current) audioCtxRef.current.close();
+    if (audioCtxRef.current) {
+      try {
+        if (audioCtxRef.current.state !== "closed") {
+          await audioCtxRef.current.close();
+        }
+      } catch { /* already closed */ }
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
 
     const finalSegments = liveSegmentsRef.current;
 
@@ -610,16 +698,19 @@ export default function EnginePage() {
   }, [manualTranscript, analyzeTranscript]);
 
   const reset = useCallback(() => {
-    if (autoAnalyzeTimerRef.current) clearInterval(autoAnalyzeTimerRef.current);
+    cleanupRecording();
     setState("idle");
     setSegments([]);
     setIntents([]);
     setError("");
     setDuration(0);
+    setAudioLevel(0);
     setLiveText("");
     setManualTranscript("");
     liveSegmentsRef.current = [];
-  }, []);
+    sessionIdRef.current = "";
+    chunksRef.current = [];
+  }, [cleanupRecording]);
 
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -666,8 +757,7 @@ export default function EnginePage() {
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          justifyContent: "center",
-          padding: "24px",
+          padding: "48px 24px 24px",
         }}
       >
         {/* Logo */}
@@ -684,7 +774,15 @@ export default function EnginePage() {
           Anticipy
         </a>
 
-        <div style={{ maxWidth: 420, width: "100%" }}>
+        <div
+          style={{
+            maxWidth: 420,
+            width: "100%",
+            margin: "auto 0",
+            paddingTop: 24,
+            paddingBottom: 24,
+          }}
+        >
           {/* Tagline */}
           <div style={{ textAlign: "center", marginBottom: 36 }}>
             <h1
@@ -936,8 +1034,7 @@ export default function EnginePage() {
         {/* Footer */}
         <p
           style={{
-            position: "absolute",
-            bottom: 24,
+            marginTop: 32,
             fontSize: 12,
             color: "rgba(255,255,255,0.2)",
           }}

@@ -10,6 +10,74 @@ import { requireSupabaseUser } from "@/lib/require-auth";
 
 export const dynamic = "force-dynamic";
 
+// Action types that represent conversational back-and-forth, not real future tasks.
+// These are dropped before insertion regardless of LLM confidence.
+const IGNORED_ACTION_TYPES = new Set([
+  "confirm_item_possession",
+  "clarify_status",
+  "email_subject_instruction",
+  "email_instruction",
+  "check_email_flagging",
+  "send_email_instruction",
+  "confirm_status",
+  "answer_question",
+  "acknowledge",
+  "small_talk",
+]);
+
+const CONFIDENCE_THRESHOLD = 0.65;
+const SUMMARY_OVERLAP_THRESHOLD = 0.8;
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    (text || "")
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length > 2)
+  );
+}
+
+function jaccardSimilarity(a: string, b: string): number {
+  const wordsA = tokenize(a);
+  const wordsB = tokenize(b);
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let intersection = 0;
+  for (const w of wordsA) if (wordsB.has(w)) intersection += 1;
+  const union = wordsA.size + wordsB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+interface ExistingIntent {
+  action_type: string | null;
+  summary_for_user: string | null;
+  evidence_quote: string | null;
+}
+
+function isDuplicateOfExisting(
+  candidate: { action_type: string; summary_for_user: string; evidence_quote: string },
+  existing: ExistingIntent[]
+): boolean {
+  for (const e of existing) {
+    const sameType = e.action_type === candidate.action_type;
+    const summarySim = jaccardSimilarity(
+      candidate.summary_for_user,
+      e.summary_for_user || ""
+    );
+    if (summarySim >= SUMMARY_OVERLAP_THRESHOLD) return true;
+    if (sameType) {
+      const evidenceSim = jaccardSimilarity(
+        candidate.evidence_quote,
+        e.evidence_quote || ""
+      );
+      // Same action_type + similar evidence quote → duplicate
+      if (evidenceSim >= 0.6) return true;
+      // Same action_type + moderately similar summary → duplicate
+      if (summarySim >= 0.5) return true;
+    }
+  }
+  return false;
+}
+
 export async function POST(req: Request) {
   const authedUser = await requireSupabaseUser(req);
   if (!authedUser) {
@@ -61,17 +129,19 @@ export async function POST(req: Request) {
       });
     }
 
-    // Get recent actions from this session
+    // Get recent actions from this session — fetch full set for both LLM context and server-side dedup
     const { data: recentIntents } = await supabaseAdmin
       .from("anticipy_intents")
-      .select("summary_for_user")
+      .select("action_type, summary_for_user, evidence_quote")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(50);
 
-    const recentActions = (recentIntents ?? []).map(
-      (i) => i.summary_for_user
-    );
+    const sessionExistingIntents: ExistingIntent[] = recentIntents ?? [];
+    const recentActions = sessionExistingIntents
+      .slice(0, 10)
+      .map((i) => i.summary_for_user || "")
+      .filter(Boolean);
 
     // Cross-session memory: fetch intents from user's other sessions in past 24h
     let crossSessionContext: string[] = [];
@@ -171,14 +241,41 @@ export async function POST(req: Request) {
 
     const intents = parsed.intents ?? [];
 
-    // Filter by confidence threshold
-    const validIntents = intents.filter(
-      (i) => typeof i.confidence === "number" && i.confidence >= 0.5
-    );
+    // Filter by confidence threshold and drop conversational/non-actionable types
+    const validIntents = intents.filter((i) => {
+      if (typeof i.confidence !== "number" || i.confidence < CONFIDENCE_THRESHOLD) return false;
+      const actionType = String(i.action_type || "").toLowerCase();
+      if (IGNORED_ACTION_TYPES.has(actionType)) return false;
+      const summary = String(i.summary_for_user || "").trim();
+      if (!summary) return false;
+      return true;
+    });
+
+    // Track intents already stored in this same request so a single batch can't introduce dupes
+    const insertedThisCall: ExistingIntent[] = [];
 
     // Store intents in Supabase and dispatch notifications
     const storedIntents = [];
+    let skippedDuplicates = 0;
     for (const intent of validIntents) {
+      const candidate = {
+        action_type: String(intent.action_type || ""),
+        summary_for_user: String(intent.summary_for_user || ""),
+        evidence_quote: String(intent.evidence_quote || ""),
+      };
+
+      // Server-side fuzzy dedup against intents already in this session (and this batch).
+      // Periodic auto-analysis re-processes the growing transcript, so the LLM frequently
+      // re-emits the same intent — block it before it ever reaches the DB or notifications.
+      const allExisting = [...sessionExistingIntents, ...insertedThisCall];
+      if (isDuplicateOfExisting(candidate, allExisting)) {
+        skippedDuplicates += 1;
+        console.log(
+          `[dedup] Skipping duplicate intent: ${candidate.action_type} - ${candidate.summary_for_user.substring(0, 60)}`
+        );
+        continue;
+      }
+
       const { data, error } = await supabaseAdmin
         .from("anticipy_intents")
         .insert({
@@ -201,6 +298,7 @@ export async function POST(req: Request) {
 
       const intentWithId = { ...intent, id: data.id };
       storedIntents.push(intentWithId);
+      insertedThisCall.push(candidate);
 
       // Broadcast to extension via Supabase Realtime (bypasses RLS — works with anon key)
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -313,7 +411,13 @@ export async function POST(req: Request) {
       intents: storedIntents,
       totalInferred: intents.length,
       totalValid: validIntents.length,
-      _debug: { model: usedModel, responseLength: response?.length ?? 0, reasoning: parsed.reasoning?.substring(0, 200) },
+      totalSkippedDuplicates: skippedDuplicates,
+      _debug: {
+        model: usedModel,
+        responseLength: response?.length ?? 0,
+        reasoning: parsed.reasoning?.substring(0, 200),
+        skippedDuplicates,
+      },
     });
   } catch (err) {
     console.error("Analyze error:", err);
