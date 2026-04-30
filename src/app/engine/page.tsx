@@ -32,7 +32,7 @@ type EngineState =
   | "done"
   | "error";
 
-type AuthMode = "signin" | "signup";
+type AuthMode = "signin" | "signup" | "reset";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -82,6 +82,7 @@ export default function EnginePage() {
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authSuccess, setAuthSuccess] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   // ── Setup state ─────────────────────────────────────────────────────────────
   const [accessCode, setAccessCode] = useState("");
@@ -218,7 +219,21 @@ export default function EnginePage() {
       setAuthSubmitting(true);
 
       try {
-        if (authMode === "signup") {
+        if (authMode === "reset") {
+          const redirectTo =
+            typeof window !== "undefined"
+              ? `${window.location.origin}/engine`
+              : undefined;
+          const { error } = await supabase.auth.resetPasswordForEmail(
+            authEmail,
+            redirectTo ? { redirectTo } : undefined
+          );
+          if (error) {
+            setAuthError(error.message);
+          } else {
+            setResetSent(true);
+          }
+        } else if (authMode === "signup") {
           const { error, data } = await supabase.auth.signUp({
             email: authEmail,
             password: authPassword,
@@ -892,8 +907,8 @@ export default function EnginePage() {
               padding: 28,
             }}
           >
-            {authSuccess ? (
-              /* Email confirmation sent */
+            {authSuccess || resetSent ? (
+              /* Email confirmation / reset link sent */
               <div style={{ textAlign: "center", padding: "8px 0" }}>
                 <div
                   style={{
@@ -930,15 +945,28 @@ export default function EnginePage() {
                     marginBottom: 20,
                   }}
                 >
-                  We sent a confirmation link to{" "}
-                  <strong style={{ color: "var(--text-on-dark)" }}>
-                    {authEmail}
-                  </strong>
-                  . Click it to activate your account, then come back here.
+                  {resetSent ? (
+                    <>
+                      We sent a password reset link to{" "}
+                      <strong style={{ color: "var(--text-on-dark)" }}>
+                        {authEmail}
+                      </strong>
+                      . Click it to choose a new password.
+                    </>
+                  ) : (
+                    <>
+                      We sent a confirmation link to{" "}
+                      <strong style={{ color: "var(--text-on-dark)" }}>
+                        {authEmail}
+                      </strong>
+                      . Click it to activate your account, then come back here.
+                    </>
+                  )}
                 </p>
                 <button
                   onClick={() => {
                     setAuthSuccess(false);
+                    setResetSent(false);
                     setAuthMode("signin");
                   }}
                   style={{
@@ -1022,36 +1050,85 @@ export default function EnginePage() {
                       }}
                     />
                   </div>
-                  <div style={{ marginBottom: authError ? 10 : 16 }}>
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      placeholder={
-                        authMode === "signup"
-                          ? "Password (8+ characters)"
-                          : "Password"
-                      }
-                      required
-                      minLength={8}
-                      autoComplete={
-                        authMode === "signup"
-                          ? "new-password"
-                          : "current-password"
-                      }
-                      style={{
-                        width: "100%",
-                        padding: "10px 12px",
-                        background: "rgba(255,255,255,0.05)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        borderRadius: 8,
-                        color: "var(--text-on-dark)",
-                        fontSize: 14,
-                        outline: "none",
-                        boxSizing: "border-box",
-                      }}
-                    />
-                  </div>
+                  {authMode !== "reset" && (
+                    <div style={{ marginBottom: 6 }}>
+                      <input
+                        type="password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        placeholder={
+                          authMode === "signup"
+                            ? "Password (8+ characters)"
+                            : "Password"
+                        }
+                        required
+                        minLength={8}
+                        autoComplete={
+                          authMode === "signup"
+                            ? "new-password"
+                            : "current-password"
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "10px 12px",
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 8,
+                          color: "var(--text-on-dark)",
+                          fontSize: 14,
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  )}
+                  {authMode === "signin" && (
+                    <div style={{ textAlign: "right", marginBottom: 12 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMode("reset");
+                          setAuthError("");
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--text-on-dark-muted)",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          padding: 0,
+                          textDecoration: "underline",
+                        }}
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
+                  {authMode === "reset" && (
+                    <div style={{ marginBottom: 12 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMode("signin");
+                          setAuthError("");
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--text-on-dark-muted)",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          padding: 0,
+                          textDecoration: "underline",
+                        }}
+                      >
+                        ← Back to sign in
+                      </button>
+                    </div>
+                  )}
+                  {authMode !== "signin" && authMode !== "reset" && (
+                    <div style={{ marginBottom: authError ? 10 : 4 }} />
+                  )}
                   {authError && (
                     <p
                       style={{
@@ -1084,7 +1161,9 @@ export default function EnginePage() {
                       ? "…"
                       : authMode === "signin"
                         ? "Sign in"
-                        : "Create account"}
+                        : authMode === "signup"
+                          ? "Create account"
+                          : "Send reset link"}
                   </button>
                 </form>
               </>
