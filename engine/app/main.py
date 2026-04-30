@@ -32,6 +32,7 @@ from app.config import (
     MAX_TASKS_PER_DAY,
     REQUIRED_ENV_VARS,
     MODEL_CHAIN,
+    ENGINE_INTERNAL_TOKEN,
 )
 from app import supabase_client
 import os
@@ -271,7 +272,6 @@ async def stats(token: str):
         "total_tasks": _total_tasks,
         "total_errors": _total_errors,
         "models_configured": len(MODEL_CHAIN),
-        "model_names": [m["name"] for m in MODEL_CHAIN],
     }
 
 
@@ -286,7 +286,7 @@ class ExecuteIntentRequest(BaseModel):
 
 
 @app.post("/execute-intent")
-async def execute_intent_endpoint(req: ExecuteIntentRequest):
+async def execute_intent_endpoint(req: ExecuteIntentRequest, request: Request):
     """
     Execute a browser automation task from a structured intent description.
 
@@ -294,7 +294,17 @@ async def execute_intent_endpoint(req: ExecuteIntentRequest):
     keeps running even if the HTTP client disconnects early.  Waits up to
     25 s for a result before returning a "working" response; the background
     task writes the final outcome to engine_tasks in Supabase either way.
+
+    Requires the X-Engine-Token header to match ENGINE_INTERNAL_TOKEN — this
+    is a server-to-server endpoint called by the Next.js backend on behalf of
+    a user, not directly by the user. If ENGINE_INTERNAL_TOKEN is not set the
+    endpoint refuses all calls (fail-closed).
     """
+    if not ENGINE_INTERNAL_TOKEN:
+        raise HTTPException(status_code=503, detail="endpoint disabled")
+    if request.headers.get("x-engine-token") != ENGINE_INTERNAL_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
     if not req.task or not req.task.strip():
         raise HTTPException(status_code=400, detail="task is required")
 
@@ -471,6 +481,7 @@ async def ws_task(websocket: WebSocket):
 
     user_id: str | None = None
     task_running = False
+    bg_task: asyncio.Task | None = None
 
     # Extract token from query params
     query_token = websocket.query_params.get("token")
@@ -573,13 +584,15 @@ async def ws_task(websocket: WebSocket):
                             receive_confirmation=receive_confirmation,
                             user_id=user_id,
                         )
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
                         _total_errors += 1
                         await send_msg({"type": "error", "message": msg.CONNECTION_ERROR})
                     finally:
                         task_running = False
 
-                asyncio.create_task(run_task())
+                bg_task = asyncio.create_task(run_task())
 
             # --- Confirmation / continue ---
             elif msg_type in ("confirm", "continue"):
@@ -597,3 +610,12 @@ async def ws_task(websocket: WebSocket):
             await websocket.close()
         except Exception:
             pass
+    finally:
+        # Cancel any running browser task so we don't leak browser sessions
+        # or burn LLM tokens after the client disconnects.
+        if bg_task is not None and not bg_task.done():
+            bg_task.cancel()
+            try:
+                await bg_task
+            except (asyncio.CancelledError, Exception):
+                pass

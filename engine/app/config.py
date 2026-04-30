@@ -29,6 +29,9 @@ JWT_SECRET: str = os.environ.get("JWT_SECRET", "anticipy-engine-secret-change-me
 JWT_ALGORITHM: str = "HS256"
 JWT_EXPIRY_HOURS: int = 72
 
+# --- Server-to-server token for /execute-intent (Next.js → engine bridge) ---
+ENGINE_INTERNAL_TOKEN: str = os.environ.get("ENGINE_INTERNAL_TOKEN", "")
+
 # --- Budget limits (hard caps) ---
 MAX_STEPS: int = 40
 MAX_SECONDS: int = 300
