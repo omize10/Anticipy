@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react";
 
-const PASSCODE = "123";
-
 export default function DemoPage() {
   const [authenticated, setAuthenticated] = useState(false);
   const [passcode, setPasscode] = useState("");
@@ -24,7 +22,8 @@ export default function DemoPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passcode === PASSCODE) {
+    const expected = process.env.NEXT_PUBLIC_DEMO_PASSCODE;
+    if (expected && passcode === expected) {
       sessionStorage.setItem("anticipy_demo_auth", "true");
       setAuthenticated(true);
       setError("");

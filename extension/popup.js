@@ -58,7 +58,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!code) { showAuthError("Enter your access code."); return; }
 
     signInBtn.disabled = true;
-    signInBtn.textContent = "Signing in…";
+    signInBtn.textContent = "Connecting…";
     hideAuthError();
 
     try {
@@ -88,11 +88,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       setAuthState(true);
-    } catch (e) {
+    } catch {
       showAuthError("Could not reach anticipy.ai. Check your connection.");
     } finally {
       signInBtn.disabled = false;
-      signInBtn.textContent = "Sign in";
+      signInBtn.textContent = "Connect";
     }
   });
 
