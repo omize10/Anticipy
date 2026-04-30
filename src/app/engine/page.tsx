@@ -421,7 +421,23 @@ export default function EnginePage() {
         }
       };
 
-      dgWs.onerror = (e) => console.error("Deepgram WebSocket error:", e);
+      dgWs.onerror = (e) => {
+        console.error("Deepgram WebSocket error:", e);
+        setError(
+          "Live transcription dropped. Stop and start again to reconnect — your audio is still being captured."
+        );
+      };
+
+      dgWs.onclose = (e) => {
+        // Code 1000 = normal close (we initiated it on stopRecording).
+        // Anything else mid-recording is unexpected.
+        if (e.code !== 1000 && mediaRecorderRef.current?.state === "recording") {
+          console.warn("Deepgram WebSocket closed unexpectedly:", e.code, e.reason);
+          setError(
+            "Live transcription dropped. Stop and start again to reconnect."
+          );
+        }
+      };
 
       const recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -483,6 +499,25 @@ export default function EnginePage() {
       setError(message);
       setState("error");
       cleanupRecording();
+      // If we already created a session row, mark it ended so it doesn't sit
+      // in "recording" status forever and confuse the analyze isFinal guard.
+      const orphanedSessionId = sessionIdRef.current;
+      if (orphanedSessionId) {
+        sessionIdRef.current = "";
+        try {
+          const { data: { session: authSession } } = await supabase.auth.getSession();
+          if (authSession) {
+            fetch("/api/engine/session", {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${authSession.access_token}`,
+              },
+              body: JSON.stringify({ sessionId: orphanedSessionId, status: "ended" }),
+            }).catch(() => { /* best-effort */ });
+          }
+        } catch { /* best-effort */ }
+      }
     }
   }, [cleanupRecording]);
 
@@ -1481,7 +1516,7 @@ export default function EnginePage() {
             {(state === "processing" || state === "transcribing") &&
               "Transcribing..."}
             {state === "analyzing" && "Finding actions..."}
-            {state === "done" && "Done."}
+            {state === "done" && (error ? "Couldn't finish." : "Done.")}
             {state === "error" && "Something went wrong."}
           </h1>
           <p
@@ -1495,8 +1530,10 @@ export default function EnginePage() {
               "Processing your audio with speaker diarization..."}
             {state === "analyzing" &&
               "Analyzing your conversation for actionable moments..."}
-            {state === "done" &&
+            {state === "done" && !error && intents.length > 0 &&
               `${intents.length} action${intents.length !== 1 ? "s" : ""} found. Notifications sent.`}
+            {state === "done" && !error && intents.length === 0 &&
+              "No clear actions found in this conversation."}
           </p>
 
           {/* Record button */}
@@ -1788,7 +1825,7 @@ export default function EnginePage() {
                                 border: "1px solid rgba(200,169,126,0.2)",
                               }}
                             >
-                              {intent.action_type.replace("_", " ")}
+                              {intent.action_type.replace(/_/g, " ")}
                             </span>
                             <span
                               className="text-[12px]"

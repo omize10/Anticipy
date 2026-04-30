@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { escapeHtml, sanitizeHeader } from "./escape";
 
 const resend = new Resend(process.env.RESEND_API_KEY ?? "re_placeholder");
 const FROM_EMAIL = "Anticipy <notifications@aevoy.com>";
@@ -17,8 +18,9 @@ export async function sendIntentEmail(
   baseUrl: string,
   subjectPrefix?: string
 ): Promise<{ id: string } | null> {
-  const confirmUrl = `${baseUrl}/api/engine/confirm?intentId=${intent.intentId}&action=yes`;
-  const rejectUrl = `${baseUrl}/api/engine/confirm?intentId=${intent.intentId}&action=no`;
+  const safeIntentId = encodeURIComponent(intent.intentId);
+  const confirmUrl = `${baseUrl}/api/engine/confirm?intentId=${safeIntentId}&action=yes`;
+  const rejectUrl = `${baseUrl}/api/engine/confirm?intentId=${safeIntentId}&action=no`;
 
   const importanceBadge =
     intent.importance === "critical"
@@ -29,9 +31,13 @@ export async function sendIntentEmail(
           ? "🟡 Standard"
           : "⚪ Low";
 
-  const subject = subjectPrefix
+  const rawSubject = subjectPrefix
     ? `${subjectPrefix} Anticipy: ${intent.summary}`
     : `Anticipy: ${intent.summary}`;
+  const subject = sanitizeHeader(rawSubject, 180);
+
+  const safeSummary = escapeHtml(intent.summary);
+  const safeQuote = escapeHtml(intent.evidenceQuote);
 
   const { data, error } = await resend.emails.send({
     from: FROM_EMAIL,
@@ -46,11 +52,11 @@ export async function sendIntentEmail(
 
         <p style="font-size: 14px; color: #8A8A8A; margin-bottom: 8px;">I heard you mention:</p>
         <blockquote style="border-left: 3px solid #C8A97E; padding-left: 16px; margin: 0 0 24px 0; font-style: italic; color: #FAFAFA;">
-          "${intent.evidenceQuote}"
+          "${safeQuote}"
         </blockquote>
 
         <p style="font-size: 16px; margin-bottom: 24px; color: #FAFAFA;">
-          <strong>${intent.summary}</strong>
+          <strong>${safeSummary}</strong>
         </p>
 
         <div style="display: flex; gap: 12px; margin-bottom: 24px;">

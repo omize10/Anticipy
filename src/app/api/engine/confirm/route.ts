@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { executeAction } from "@/lib/execute-action";
+import { escapeHtml } from "@/lib/escape";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ export async function GET(req: Request) {
     .select("id");
 
   if (error) {
-    return new Response(renderPage("Error", error.message), {
+    return new Response(renderPage("Error", escapeHtml(error.message)), {
       headers: { "Content-Type": "text/html" },
       status: 500,
     });
@@ -130,13 +131,19 @@ export async function GET(req: Request) {
       newStatus === "confirmed" ? "Confirmed" : "Skipped",
       mainMessage +
         (executionMessage
-          ? `<br><br><span style="font-size:13px;color:#C8A97E;">${executionMessage}</span>`
+          ? `<br><br><span style="font-size:13px;color:#C8A97E;">${escapeHtml(executionMessage)}</span>`
           : "")
     ),
     { headers: { "Content-Type": "text/html" } }
   );
 }
 
+/**
+ * Renders the post-confirm/skip page. `message` may contain a small,
+ * caller-controlled HTML snippet (e.g. a styled span around an
+ * already-escaped execution message). All user-influenced text MUST be
+ * passed through escapeHtml() before being interpolated into `message`.
+ */
 function renderPage(title: string, message: string): string {
   const emoji =
     title === "Confirmed"

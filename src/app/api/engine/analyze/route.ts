@@ -7,83 +7,14 @@ import { sendIntentEmail } from "@/lib/resend-notify";
 import { sendTwilioNotification } from "@/lib/twilio-notify";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireSupabaseUser } from "@/lib/require-auth";
+import {
+  ExistingIntent,
+  filterValidIntents,
+  isDuplicateOfExisting,
+  RawIntent,
+} from "@/lib/dedup";
 
 export const dynamic = "force-dynamic";
-
-// Action types that represent conversational back-and-forth, not real future tasks.
-// These are dropped before insertion regardless of LLM confidence.
-const IGNORED_ACTION_TYPES = new Set([
-  "confirm_item_possession",
-  "clarify_status",
-  "email_subject_instruction",
-  "email_instruction",
-  "check_email_flagging",
-  "send_email_instruction",
-  "confirm_status",
-  "answer_question",
-  "acknowledge",
-  "small_talk",
-]);
-
-const CONFIDENCE_THRESHOLD = 0.65;
-const SUMMARY_OVERLAP_THRESHOLD = 0.8;
-
-function tokenize(text: string): string[] {
-  const words = (text || "")
-    .toLowerCase()
-    .split(/\W+/)
-    .filter((w: string) => w.length > 2);
-  // Deduplicate without Set iteration
-  const seen: Record<string, boolean> = {};
-  return words.filter((w: string) => {
-    if (seen[w]) return false;
-    seen[w] = true;
-    return true;
-  });
-}
-
-function jaccardSimilarity(a: string, b: string): number {
-  const wordsA = tokenize(a);
-  const wordsB = tokenize(b);
-  if (wordsA.length === 0 || wordsB.length === 0) return 0;
-  const setB: Record<string, boolean> = {};
-  wordsB.forEach((w: string) => { setB[w] = true; });
-  let intersection = 0;
-  wordsA.forEach((w: string) => { if (setB[w]) intersection += 1; });
-  const union = wordsA.length + wordsB.length - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-interface ExistingIntent {
-  action_type: string | null;
-  summary_for_user: string | null;
-  evidence_quote: string | null;
-}
-
-function isDuplicateOfExisting(
-  candidate: { action_type: string; summary_for_user: string; evidence_quote: string },
-  existing: ExistingIntent[]
-): boolean {
-  for (const e of existing) {
-    const sameType = e.action_type === candidate.action_type;
-    const summarySim = jaccardSimilarity(
-      candidate.summary_for_user,
-      e.summary_for_user || ""
-    );
-    if (summarySim >= SUMMARY_OVERLAP_THRESHOLD) return true;
-    if (sameType) {
-      const evidenceSim = jaccardSimilarity(
-        candidate.evidence_quote,
-        e.evidence_quote || ""
-      );
-      // Same action_type + similar evidence quote → duplicate
-      if (evidenceSim >= 0.6) return true;
-      // Same action_type + moderately similar summary → duplicate
-      if (summarySim >= 0.5) return true;
-    }
-  }
-  return false;
-}
 
 export async function POST(req: Request) {
   const authedUser = await requireSupabaseUser(req);
@@ -92,17 +23,34 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { sessionId, transcript, timezone = "America/Vancouver", isFinal = true } =
-      await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+    const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+    const transcript =
+      typeof body.transcript === "string" ? body.transcript : "";
+    const timezone =
+      typeof body.timezone === "string" && body.timezone.length > 0
+        ? body.timezone
+        : "America/Vancouver";
+    const isFinal = body.isFinal === undefined ? true : Boolean(body.isFinal);
+
     // Email recipient is the authenticated user — never trust a client-supplied address.
     const user_email = authedUser.email;
 
-    if (!transcript || !sessionId) {
+    if (!transcript.trim() || !sessionId) {
       return NextResponse.json(
         { error: "Missing transcript or sessionId" },
         { status: 400 }
       );
     }
+    // Cap transcript size — keeps LLM calls bounded on long-running sessions.
+    const MAX_TRANSCRIPT_CHARS = 60_000;
+    const safeTranscript =
+      transcript.length > MAX_TRANSCRIPT_CHARS
+        ? transcript.slice(transcript.length - MAX_TRANSCRIPT_CHARS)
+        : transcript;
 
     // Verify session exists — prevents notification spam from arbitrary UUIDs.
     // Only block if already ended AND this is the final call (periodic mid-recording
@@ -185,7 +133,7 @@ export async function POST(req: Request) {
 
     // Build the prompt
     const { system, user } = buildIntentPrompt(
-      transcript,
+      safeTranscript,
       localTime,
       timezone,
       recentActions,
@@ -246,16 +194,19 @@ export async function POST(req: Request) {
       console.log(`[${usedModel}] Intent reasoning:\n${parsed.reasoning}`);
     }
 
-    const intents = parsed.intents ?? [];
+    const intents: RawIntent[] = parsed.intents ?? [];
 
-    // Filter by confidence threshold and drop conversational/non-actionable types
-    const validIntents = intents.filter((i) => {
-      if (typeof i.confidence !== "number" || i.confidence < CONFIDENCE_THRESHOLD) return false;
-      const actionType = String(i.action_type || "").toLowerCase();
-      if (IGNORED_ACTION_TYPES.has(actionType)) return false;
-      const summary = String(i.summary_for_user || "").trim();
-      if (!summary) return false;
-      return true;
+    // Filter by confidence threshold and drop conversational/non-actionable types.
+    // Pair filtered candidates with their original raw intent so we can still
+    // pull confidence/importance/parameters when inserting.
+    const validIntents = filterValidIntents(intents);
+    const candidatesWithRaw = validIntents.map((c) => {
+      const raw = intents.find((i) => {
+        const at = String(i.action_type ?? "").toLowerCase().trim();
+        const summary = String(i.summary_for_user ?? "").trim();
+        return at === c.action_type && summary === c.summary_for_user;
+      }) ?? {};
+      return { candidate: c, raw };
     });
 
     // Track intents already stored in this same request so a single batch can't introduce dupes
@@ -264,13 +215,7 @@ export async function POST(req: Request) {
     // Store intents in Supabase and dispatch notifications
     const storedIntents = [];
     let skippedDuplicates = 0;
-    for (const intent of validIntents) {
-      const candidate = {
-        action_type: String(intent.action_type || ""),
-        summary_for_user: String(intent.summary_for_user || ""),
-        evidence_quote: String(intent.evidence_quote || ""),
-      };
-
+    for (const { candidate, raw } of candidatesWithRaw) {
       // Server-side fuzzy dedup against intents already in this session (and this batch).
       // Periodic auto-analysis re-processes the growing transcript, so the LLM frequently
       // re-emits the same intent — block it before it ever reaches the DB or notifications.
@@ -283,16 +228,24 @@ export async function POST(req: Request) {
         continue;
       }
 
+      const importanceRaw = String(raw.importance ?? "standard").toLowerCase();
+      const importance = ["critical", "important", "standard", "low"].includes(importanceRaw)
+        ? importanceRaw
+        : "standard";
+
       const { data, error } = await supabaseAdmin
         .from("anticipy_intents")
         .insert({
           session_id: sessionId,
-          action_type: intent.action_type as string,
-          parameters: intent.parameters ?? {},
-          confidence: intent.confidence as number,
-          importance: intent.importance as string,
-          summary_for_user: intent.summary_for_user as string,
-          evidence_quote: intent.evidence_quote as string,
+          action_type: candidate.action_type,
+          parameters:
+            raw.parameters && typeof raw.parameters === "object"
+              ? (raw.parameters as Record<string, unknown>)
+              : {},
+          confidence: raw.confidence as number,
+          importance,
+          summary_for_user: candidate.summary_for_user,
+          evidence_quote: candidate.evidence_quote,
           status: "pending",
         })
         .select("id")
@@ -303,9 +256,20 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const intentWithId = { ...intent, id: data.id };
+      const intentWithId = {
+        ...raw,
+        action_type: candidate.action_type,
+        summary_for_user: candidate.summary_for_user,
+        evidence_quote: candidate.evidence_quote,
+        importance,
+        id: data.id,
+      };
       storedIntents.push(intentWithId);
-      insertedThisCall.push(candidate);
+      insertedThisCall.push({
+        action_type: candidate.action_type,
+        summary_for_user: candidate.summary_for_user,
+        evidence_quote: candidate.evidence_quote,
+      });
 
       // Broadcast to extension via Supabase Realtime (bypasses RLS — works with anon key)
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -324,11 +288,11 @@ export async function POST(req: Request) {
               event: "new_intent",
               payload: {
                 id: data.id,
-                action_type: intent.action_type,
-                importance: intent.importance,
-                confidence: intent.confidence,
-                summary_for_user: intent.summary_for_user,
-                evidence_quote: intent.evidence_quote,
+                action_type: candidate.action_type,
+                importance,
+                confidence: raw.confidence,
+                summary_for_user: candidate.summary_for_user,
+                evidence_quote: candidate.evidence_quote,
                 status: "pending",
               },
             }],
@@ -340,7 +304,6 @@ export async function POST(req: Request) {
       // critical → voice + SMS + email
       // important/standard → SMS + email
       // low → email only
-      const importance = intent.importance as string;
       const adminEmail = "omar@anticipy.ai";
       const baseUrl =
         process.env.NEXT_PUBLIC_SITE_URL ||
@@ -350,10 +313,10 @@ export async function POST(req: Request) {
 
       const intentPayload = {
         intentId: data.id,
-        summary: intent.summary_for_user as string,
-        evidenceQuote: intent.evidence_quote as string,
+        summary: candidate.summary_for_user,
+        evidenceQuote: candidate.evidence_quote,
         importance,
-        actionType: intent.action_type as string,
+        actionType: candidate.action_type,
       };
 
       if (user_email) {
@@ -399,7 +362,7 @@ export async function POST(req: Request) {
       if (notifyPhone && importance !== "low") {
         await sendTwilioNotification(
           notifyPhone,
-          intent.summary_for_user as string,
+          candidate.summary_for_user,
           importance,
           data.id
         );
