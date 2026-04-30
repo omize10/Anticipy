@@ -319,7 +319,10 @@ export async function POST(req: Request) {
         actionType: candidate.action_type,
       };
 
-      if (user_email) {
+      // Always email the admin so we can see what users are doing in the demo.
+      // If the authed user has an email (Supabase auth requires one, so this
+      // is virtually always true), notify them too.
+      if (user_email && user_email !== adminEmail) {
         const userEmailResult = await sendIntentEmail(user_email, intentPayload, baseUrl);
         if (userEmailResult) {
           await supabaseAdmin.from("anticipy_notifications").insert({
@@ -329,32 +332,24 @@ export async function POST(req: Request) {
             status: "sent",
           });
         }
+      }
 
-        const adminEmailResult = await sendIntentEmail(
-          adminEmail,
-          intentPayload,
-          baseUrl,
-          `[Admin] User (${user_email}):`
-        );
-        if (adminEmailResult) {
-          await supabaseAdmin.from("anticipy_notifications").insert({
-            intent_id: data.id,
-            channel: "email",
-            recipient: adminEmail,
-            status: "sent",
-          });
-        }
-      } else {
-        const emailResult = await sendIntentEmail(
-          user_email || adminEmail, intentPayload, baseUrl);
-        if (emailResult) {
-          await supabaseAdmin.from("anticipy_notifications").insert({
-            intent_id: data.id,
-            channel: "email",
-            recipient: adminEmail,
-            status: "sent",
-          });
-        }
+      const adminLabel = user_email
+        ? `[Admin] User (${user_email}):`
+        : "[Admin]";
+      const adminEmailResult = await sendIntentEmail(
+        adminEmail,
+        intentPayload,
+        baseUrl,
+        adminLabel
+      );
+      if (adminEmailResult) {
+        await supabaseAdmin.from("anticipy_notifications").insert({
+          intent_id: data.id,
+          channel: "email",
+          recipient: adminEmail,
+          status: "sent",
+        });
       }
 
       // SMS + Voice for non-low importance levels

@@ -65,7 +65,7 @@ export async function sendIntentEmail(
         </div>
 
         <p style="font-size: 12px; color: #5A5A5A;">
-          Reply to this email with "yes" or "no" — or click the buttons above.
+          Tap a button above to confirm or skip — Anticipy will handle the rest.
         </p>
       </div>
     `,
