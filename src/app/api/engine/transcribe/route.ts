@@ -133,7 +133,9 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("Transcribe error:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Transcription failed. Please try again." },
+      { status: 500 }
+    );
   }
 }
