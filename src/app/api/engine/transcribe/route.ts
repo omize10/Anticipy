@@ -13,6 +13,20 @@ const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
 // client can't insert millions of rows in a single request.
 const MAX_SEGMENTS_PER_REQUEST = 10_000;
 
+async function assertOwnsSession(
+  sessionId: string,
+  userId: string
+): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from("anticipy_sessions")
+    .select("user_id")
+    .eq("id", sessionId)
+    .single();
+  if (!data) return false;
+  // Legacy rows may have null user_id — treat those as owned-by-anyone-authed
+  return !data.user_id || data.user_id === userId;
+}
+
 export async function POST(req: Request) {
   const user = await requireSupabaseUser(req);
   if (!user) {
@@ -36,6 +50,9 @@ export async function POST(req: Request) {
           { error: "Too many segments in a single request." },
           { status: 413 }
         );
+      }
+      if (!(await assertOwnsSession(sessionId, user.id))) {
+        return NextResponse.json({ error: "Session not found" }, { status: 404 });
       }
 
       const { error: insertError } = await supabaseAdmin
@@ -66,6 +83,9 @@ export async function POST(req: Request) {
     }
     if (!sessionId) {
       return NextResponse.json({ error: "No sessionId" }, { status: 400 });
+    }
+    if (!(await assertOwnsSession(sessionId, user.id))) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
     if (audioFile.size > MAX_AUDIO_BYTES) {
       return NextResponse.json(
@@ -133,7 +153,9 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("Transcribe error:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "Transcription failed. Please try again." },
+      { status: 500 }
+    );
   }
 }

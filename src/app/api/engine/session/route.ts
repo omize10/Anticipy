@@ -21,7 +21,11 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Session insert error:", error);
+    return NextResponse.json(
+      { error: "Could not create session." },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ sessionId: data.id });
@@ -34,6 +38,21 @@ export async function PATCH(req: Request) {
   }
 
   const { sessionId, status, totalAudioSeconds } = await req.json();
+  if (!sessionId || typeof sessionId !== "string") {
+    return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+  }
+
+  // Only allow updating sessions owned by this user. Without this check, any
+  // authed user who knows another user's session UUID could end their
+  // recording or rewrite their status field.
+  const { data: existing } = await supabaseAdmin
+    .from("anticipy_sessions")
+    .select("user_id")
+    .eq("id", sessionId)
+    .single();
+  if (!existing || (existing.user_id && existing.user_id !== user.id)) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
 
   const update: Record<string, unknown> = {};
   if (status) update.status = status;
@@ -46,7 +65,11 @@ export async function PATCH(req: Request) {
     .eq("id", sessionId);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Session update error:", error);
+    return NextResponse.json(
+      { error: "Could not update session." },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ ok: true });

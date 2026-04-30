@@ -82,9 +82,9 @@ async function ensureAccessCode(
  * GET /api/extension/access-code
  *
  * Returns the user's unique access code from engine_users table.
- * Requires a valid engine JWT or Supabase auth token in the Authorization header.
- * If the caller is a Supabase auth user without an engine_users row yet,
- * one is provisioned on the fly.
+ * Requires a valid Supabase auth token in the Authorization header. If the
+ * caller is a Supabase auth user without an engine_users row yet, one is
+ * provisioned on the fly.
  */
 export async function GET(req: Request) {
   const corsHeaders = {
@@ -108,25 +108,8 @@ export async function GET(req: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
   );
 
-  // Try to decode as engine JWT first (has user_id claim)
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    if (payload.user_id) {
-      const { data: user } = await supabase
-        .from("engine_users")
-        .select("access_code")
-        .eq("id", payload.user_id)
-        .single();
-
-      if (user?.access_code) {
-        return NextResponse.json({ code: user.access_code }, { headers: corsHeaders });
-      }
-    }
-  } catch {
-    // Not an engine JWT, try Supabase auth below
-  }
-
-  // Fallback: Supabase auth token → look up (or provision) by email
+  // Verify with Supabase auth — never trust an unsigned JWT payload to look
+  // up another user's access_code.
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user || !user.email) {
     return NextResponse.json(
