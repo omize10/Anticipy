@@ -14,7 +14,7 @@ import { supabaseAdmin } from "./supabase-admin";
 import { createCalendarEvent } from "./google-calendar";
 import { Resend } from "resend";
 import { sendSMS } from "./twilio-notify";
-import { escapeHtml } from "./escape";
+import { escapeHtml, sanitizeHeader } from "./escape";
 
 const resend = new Resend(process.env.RESEND_API_KEY ?? "re_placeholder");
 
@@ -398,13 +398,20 @@ export async function executeAction(
           try {
             const senderHandle = userEmail.split("@")[0];
             const safeSenderHandle = escapeHtml(senderHandle);
+            // sanitizeHeader strips CR/LF — without that, an LLM-extracted
+            // subject could inject extra headers (Bcc:, Reply-To:, etc.) into
+            // the SMTP envelope.
+            const rawSubject = sanitizeHeader(
+              (params.subject as string) || "Message via Anticipy",
+              180
+            );
+            const safeFromHandle = sanitizeHeader(senderHandle, 60);
             const rawBody = (params.body as string) || "";
             const safeBodyHtml = escapeHtml(rawBody).replace(/\n/g, "<br>");
             const { data: sent, error: sendErr } = await resend.emails.send({
-              from: `${senderHandle} via Anticipy <notifications@aevoy.com>`,
+              from: `${safeFromHandle} via Anticipy <notifications@aevoy.com>`,
               to: recipientEmail,
-              subject:
-                (params.subject as string) || "Message via Anticipy",
+              subject: rawSubject,
               text: rawBody,
               html: `<p>${safeBodyHtml}</p>
                      <hr style="border:none;border-top:1px solid #eee;margin:16px 0">
