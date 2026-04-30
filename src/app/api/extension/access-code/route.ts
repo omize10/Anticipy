@@ -108,25 +108,12 @@ export async function GET(req: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
   );
 
-  // Try to decode as engine JWT first (has user_id claim)
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    if (payload.user_id) {
-      const { data: user } = await supabase
-        .from("engine_users")
-        .select("access_code")
-        .eq("id", payload.user_id)
-        .single();
-
-      if (user?.access_code) {
-        return NextResponse.json({ code: user.access_code }, { headers: corsHeaders });
-      }
-    }
-  } catch {
-    // Not an engine JWT, try Supabase auth below
-  }
-
-  // Fallback: Supabase auth token → look up (or provision) by email
+  // Validate the Supabase access token. We do NOT decode arbitrary JWTs and
+  // trust their `user_id` claim — that path used to exist as a fallback for
+  // engine-issued JWTs but was unsigned/unverified, so any caller could forge
+  // a token claiming an arbitrary user_id and read that user's access code.
+  // The Next.js side has no access to the engine's JWT_SECRET, so the only
+  // safe authenticator here is Supabase.
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user || !user.email) {
     return NextResponse.json(
