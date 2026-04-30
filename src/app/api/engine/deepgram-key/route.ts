@@ -3,6 +3,11 @@ import { requireSupabaseUser } from "@/lib/require-auth";
 
 export const dynamic = "force-dynamic";
 
+// SECURITY: this endpoint is now auth-gated, but the previous DEEPGRAM_API_KEY
+// was reachable without auth before lockdown — rotate it manually in the
+// Deepgram dashboard (https://console.deepgram.com/) and update the value in
+// Vercel env vars. Rotation must happen before this commit goes live.
+// For production we should also move to short-lived tokens via /v1/auth/grant.
 export async function GET(req: Request) {
   const user = await requireSupabaseUser(req);
   if (!user) {
