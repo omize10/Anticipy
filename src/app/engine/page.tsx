@@ -1100,7 +1100,7 @@ export default function EnginePage() {
             color: "rgba(255,255,255,0.2)",
           }}
         >
-          &copy; 2026 Anticipation Labs
+          &copy; 2026 Anticipy
         </p>
       </div>
     );
@@ -1468,7 +1468,7 @@ export default function EnginePage() {
             color: "rgba(255,255,255,0.2)",
           }}
         >
-          &copy; 2026 Anticipation Labs
+          &copy; 2026 Anticipy
         </p>
       </div>
     );
@@ -2289,7 +2289,7 @@ export default function EnginePage() {
       >
         <div className="max-w-container mx-auto flex items-center justify-between">
           <p className="text-[13px]" style={{ color: "var(--text-on-dark-muted)" }}>
-            &copy; 2026 Anticipation Labs.
+            &copy; 2026 Anticipy.
           </p>
           <div className="flex items-center gap-4">
             <a

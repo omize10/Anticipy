@@ -166,7 +166,7 @@ export default function WaitlistPage() {
       {/* Footer */}
       <div className="absolute bottom-8 text-center">
         <p className="text-[13px] text-[var(--text-on-dark-muted)]">
-          &copy; 2026 Anticipation Labs
+          &copy; 2026 Anticipy
         </p>
       </div>
     </div>
