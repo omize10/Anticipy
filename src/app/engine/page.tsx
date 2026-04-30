@@ -131,33 +131,36 @@ export default function EnginePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch access code once authenticated
-  useEffect(() => {
-    if (!session) return;
+  // Fetch access code once authenticated (also used by the retry button)
+  const fetchAccessCode = useCallback(async () => {
     setAccessCodeLoading(true);
     setAccessCodeError(false);
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
-        setAccessCodeLoading(false);
-        return;
-      }
-      try {
-        const res = await fetch("/api/extension/access-code", {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAccessCode(data.code || "");
-        } else {
-          setAccessCodeError(true);
-        }
-      } catch {
+    const { data: { session: s } } = await supabase.auth.getSession();
+    if (!s) {
+      setAccessCodeLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/extension/access-code", {
+        headers: { Authorization: `Bearer ${s.access_token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAccessCode(data.code || "");
+      } else {
         setAccessCodeError(true);
-      } finally {
-        setAccessCodeLoading(false);
       }
-    });
-  }, [session]);
+    } catch {
+      setAccessCodeError(true);
+    } finally {
+      setAccessCodeLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    fetchAccessCode();
+  }, [session, fetchAccessCode]);
 
   // Check calendar status
   useEffect(() => {
@@ -839,8 +842,8 @@ export default function EnginePage() {
                 lineHeight: 1.7,
               }}
             >
-              Anticipy listens to your conversations and handles the follow-ups
-              — bookings, emails, reminders — without you lifting a finger.
+              Sign in to record a conversation, see the actions Anticipy
+              picks up, and connect the Chrome extension that runs them for you.
             </p>
           </div>
 
@@ -988,7 +991,11 @@ export default function EnginePage() {
                       type="password"
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
-                      placeholder="Password"
+                      placeholder={
+                        authMode === "signup"
+                          ? "Password (8+ characters)"
+                          : "Password"
+                      }
                       required
                       minLength={8}
                       autoComplete={
@@ -1096,11 +1103,38 @@ export default function EnginePage() {
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <div className="max-w-container mx-auto flex items-center justify-between">
-          <a href="/" className="font-serif text-[22px]">
-            Anticipy
-          </a>
-          <div className="flex items-center gap-4">
+        <div className="max-w-container mx-auto flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
+            <a href="/" className="font-serif text-[22px] shrink-0">
+              Anticipy
+            </a>
+            <span
+              className="text-[11px] font-light tracking-wide-label uppercase px-2 py-0.5 rounded-pill shrink-0"
+              style={{
+                color: "var(--gold)",
+                background: "rgba(200,169,126,0.08)",
+                border: "1px solid rgba(200,169,126,0.2)",
+              }}
+            >
+              Engine
+            </span>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {setupDismissed && (
+              <button
+                onClick={() => setSetupDismissed(false)}
+                className="text-[12px] px-3 py-1.5 rounded-pill transition-all"
+                style={{
+                  background: "rgba(200,169,126,0.08)",
+                  color: "var(--gold)",
+                  border: "1px solid rgba(200,169,126,0.2)",
+                  cursor: "pointer",
+                }}
+                title="Show setup card again"
+              >
+                Setup
+              </button>
+            )}
             {!calendarConnected && (
               <a
                 href="/api/auth/google"
@@ -1132,8 +1166,9 @@ export default function EnginePage() {
               </span>
             )}
             <span
-              className="text-[12px]"
+              className="text-[12px] truncate max-w-[180px]"
               style={{ color: "var(--text-on-dark-muted)" }}
+              title={session.user.email}
             >
               {session.user.email}
             </span>
@@ -1150,12 +1185,6 @@ export default function EnginePage() {
             >
               Sign out
             </button>
-            <span
-              className="text-[13px] font-light tracking-wide-label uppercase"
-              style={{ color: "var(--gold)" }}
-            >
-              Engine
-            </span>
           </div>
         </div>
       </header>
@@ -1179,18 +1208,18 @@ export default function EnginePage() {
                 className="flex items-center justify-between"
                 style={{ marginBottom: 20 }}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <span
                     className="text-[11px] uppercase tracking-wide-label"
                     style={{ color: "var(--gold)" }}
                   >
-                    Extension Setup
+                    Get the extension
                   </span>
                   <span
                     className="text-[11px]"
                     style={{ color: "var(--text-on-dark-muted)" }}
                   >
-                    · 3 steps · ~2 minutes
+                    · ~3 minutes · runs in your Chrome
                   </span>
                 </div>
                 <button
@@ -1254,7 +1283,7 @@ export default function EnginePage() {
                         letterSpacing: "0.05em",
                       }}
                     >
-                      Done
+                      Signed in
                     </span>
                   </div>
                   <p
@@ -1264,14 +1293,18 @@ export default function EnginePage() {
                       marginBottom: 3,
                     }}
                   >
-                    Account created
+                    You&apos;re all set
                   </p>
                   <p
                     style={{
                       fontSize: 12,
                       color: "var(--text-on-dark-muted)",
                       fontWeight: 300,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
                     }}
+                    title={session.user.email}
                   >
                     {session.user.email}
                   </p>
@@ -1474,9 +1507,25 @@ export default function EnginePage() {
                       </button>
                     </div>
                   ) : accessCodeError ? (
-                    <p style={{ fontSize: 12, color: "#f87171" }}>
-                      Could not load access code — try refreshing the page.
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p style={{ fontSize: 12, color: "#f87171" }}>
+                        Couldn&apos;t load your access code.
+                      </p>
+                      <button
+                        onClick={fetchAccessCode}
+                        style={{
+                          padding: "4px 10px",
+                          background: "rgba(255,255,255,0.07)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 6,
+                          fontSize: 12,
+                          color: "var(--gold)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Retry
+                      </button>
+                    </div>
                   ) : (
                     <p
                       style={{
@@ -1524,16 +1573,16 @@ export default function EnginePage() {
             style={{ color: "var(--text-on-dark-muted)" }}
           >
             {state === "idle" &&
-              "Press record and have a real conversation. Anticipy listens and figures out what to do."}
+              "Press record and have a real conversation. Anticipy listens, transcribes, and surfaces every actionable moment."}
             {state === "recording" && `Recording — ${formatDuration(duration)}`}
             {state === "transcribing" &&
-              "Processing your audio with speaker diarization..."}
+              "Processing your audio..."}
             {state === "analyzing" &&
               "Analyzing your conversation for actionable moments..."}
             {state === "done" && !error && intents.length > 0 &&
-              `${intents.length} action${intents.length !== 1 ? "s" : ""} found. Notifications sent.`}
+              `${intents.length} action${intents.length !== 1 ? "s" : ""} found. We sent the notifications — confirm them to run.`}
             {state === "done" && !error && intents.length === 0 &&
-              "No clear actions found in this conversation."}
+              "No clear actions in this one. Try a conversation with plans, tasks, or follow-ups."}
           </p>
 
           {/* Record button */}
@@ -1843,17 +1892,6 @@ export default function EnginePage() {
             </div>
           )}
 
-        {state === "done" && intents.length === 0 && segments.length > 0 && (
-          <div className="text-center max-w-md mx-auto">
-            <p
-              className="text-[15px] font-light"
-              style={{ color: "var(--text-on-dark-muted)" }}
-            >
-              No actionable moments found in this conversation. Try discussing
-              plans, scheduling, or tasks.
-            </p>
-          </div>
-        )}
       </main>
 
       {/* Footer */}

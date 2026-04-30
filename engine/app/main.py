@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from app import auth as auth_module
 from app import messages as msg
-from app.router import classify, handle_chat, handle_question
+from app.router import classify, handle_chat, handle_question, needs_clarification
 from app.agent import execute_task
 from app.models import CostTracker
 from app.planner import plan_task
@@ -310,6 +310,19 @@ async def execute_intent_endpoint(req: ExecuteIntentRequest):
             "plan": "",
         }
 
+    # Surface a clarifying question to the user instead of silently failing on
+    # an under-specified task. The Next.js confirm route relays this `message`
+    # back to the user verbatim.
+    clarification = needs_clarification(task_text)
+    if clarification:
+        return {
+            "success": False,
+            "needs_clarification": True,
+            "message": clarification,
+            "data": {"reason": "needs_clarification"},
+            "plan": "",
+        }
+
     task_id = str(uuid.uuid4())
     messages_log: list[dict] = []
     plan_text: str = ""
@@ -536,6 +549,14 @@ async def ws_task(websocket: WebSocket):
                     continue
 
                 # category == "action"
+                # Ask one clarifying question up front for vague requests so we
+                # don't burn a 30-second browser session and fail. The user can
+                # reply with the missing details and re-issue the task.
+                clarification = needs_clarification(text)
+                if clarification:
+                    await send_msg({"type": "complete", "message": clarification})
+                    continue
+
                 _record_task(rate_user)
                 _total_tasks += 1
 

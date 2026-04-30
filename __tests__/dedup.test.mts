@@ -13,6 +13,7 @@ import {
   CONFIDENCE_THRESHOLD,
   type RawIntent,
   type ExistingIntent,
+  type IntentCandidate,
 } from "../src/lib/dedup.ts";
 import { buildIntentPrompt } from "../src/lib/intent-prompt.ts";
 
@@ -477,4 +478,271 @@ test("filterValidIntents: handles array containing non-object entries", () => {
   const intents = [null, undefined, "string", 123, { not: "an intent" }] as RawIntent[];
   const filtered = filterValidIntents(intents);
   assert.equal(filtered.length, 0);
+});
+
+// ─── Investor-demo scenarios ────────────────────────────────────────────────
+// Each test simulates the LLM output for a realistic transcript and checks
+// that the filter+dedup pipeline produces exactly the expected count.
+
+test("scenario: one buried task in chit-chat returns exactly 1 intent (not 3)", () => {
+  // Buried-task transcript:
+  //   "Hey did you see Madison's post / yeah / so anyway I gotta book that
+  //    flight to LA before Friday or my mom kills me / lol / what'd you eat"
+  // The LLM tends to over-emit on conversational filler. Filter should
+  // collapse to exactly 1.
+  const llmEmits: RawIntent[] = [
+    {
+      action_type: "book_flight",
+      confidence: 0.92,
+      summary_for_user: "Book a flight to LA before Friday",
+      evidence_quote: "I gotta book that flight to LA before Friday",
+    },
+    {
+      action_type: "answer_question",
+      confidence: 0.88,
+      summary_for_user: "Tell friend whether you saw Madison's post",
+      evidence_quote: "did you see Madison's post",
+    },
+    {
+      action_type: "small_talk",
+      confidence: 0.94,
+      summary_for_user: "Continue chatting about food",
+      evidence_quote: "what'd you eat",
+    },
+  ];
+  const filtered = filterValidIntents(llmEmits);
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].action_type, "book_flight");
+});
+
+test("scenario: 5-task rapid-fire meeting yields exactly 5 intents, no duplicates", () => {
+  // Five distinct task assignments across speakers in a single tick.
+  const llmEmits: RawIntent[] = [
+    {
+      action_type: "send_proposal",
+      confidence: 0.93,
+      summary_for_user: "Send the Q2 proposal to Maya by Thursday EOD",
+      evidence_quote: "Maya, you've got the Q2 proposal by Thursday",
+    },
+    {
+      action_type: "schedule_call",
+      confidence: 0.9,
+      summary_for_user: "Schedule kickoff call with engineering Friday morning",
+      evidence_quote: "let's get eng kickoff on the calendar Friday AM",
+    },
+    {
+      action_type: "follow_up_with",
+      confidence: 0.86,
+      summary_for_user: "Follow up with the design team about new mocks",
+      evidence_quote: "ping design about the updated mocks",
+    },
+    {
+      action_type: "create_report",
+      confidence: 0.88,
+      summary_for_user: "Pull the revenue numbers for the board deck",
+      evidence_quote: "I need the revenue numbers for the board deck",
+    },
+    {
+      action_type: "book_meeting",
+      confidence: 0.91,
+      summary_for_user: "Book the all-hands room for next Wednesday at 2 PM",
+      evidence_quote: "grab the big room for all-hands Wednesday at 2",
+    },
+  ];
+  const filtered = filterValidIntents(llmEmits);
+  assert.equal(filtered.length, 5);
+
+  // Every one should be unique against the others — no internal collapse
+  const stored: ExistingIntent[] = [];
+  let kept = 0;
+  for (const c of filtered) {
+    if (!isDuplicateOfExisting(c, stored)) {
+      kept += 1;
+      stored.push({
+        action_type: c.action_type,
+        summary_for_user: c.summary_for_user,
+        evidence_quote: c.evidence_quote,
+      });
+    }
+  }
+  assert.equal(kept, 5);
+});
+
+test("scenario: 5-task meeting re-emits over 3 cycles → still 5 stored intents", () => {
+  // Realistic drift: in practice the LLM keeps the same key nouns across
+  // re-emits — the topic ("Q2 proposal to Maya", "eng kickoff call") is
+  // what stays stable, while filler verbs/connectors shift. The Jaccard
+  // dedup is calibrated for exactly this pattern.
+  const cycle1: RawIntent[] = [
+    {
+      action_type: "send_proposal",
+      confidence: 0.93,
+      summary_for_user: "Send Q2 proposal to Maya by Thursday EOD",
+      evidence_quote: "Maya you've got the Q2 proposal by Thursday",
+    },
+    {
+      action_type: "schedule_call",
+      confidence: 0.9,
+      summary_for_user: "Schedule eng kickoff call for Friday morning",
+      evidence_quote: "let's get eng kickoff scheduled Friday morning",
+    },
+  ];
+  // Cycle 2: 1+2 re-emit (drift, but nouns preserved), 3 newly surfaces
+  const cycle2: RawIntent[] = [
+    {
+      action_type: "send_proposal",
+      confidence: 0.94,
+      summary_for_user: "Send Q2 proposal to Maya by Thursday end of day",
+      evidence_quote: "Maya you've got the Q2 proposal by Thursday EOD",
+    },
+    {
+      action_type: "schedule_call",
+      confidence: 0.91,
+      summary_for_user: "Schedule eng kickoff call Friday morning",
+      evidence_quote: "let's get eng kickoff scheduled Friday morning for sure",
+    },
+    {
+      action_type: "follow_up_with",
+      confidence: 0.86,
+      summary_for_user: "Follow up with design team about updated mocks",
+      evidence_quote: "ping the design team about the updated mocks",
+    },
+  ];
+  // Cycle 3: 1-3 all re-drift, 4+5 newly surface
+  const cycle3: RawIntent[] = [
+    {
+      action_type: "send_proposal",
+      confidence: 0.92,
+      summary_for_user: "Send Q2 proposal Maya Thursday EOD",
+      evidence_quote: "the Q2 proposal needs to be with Maya by Thursday",
+    },
+    {
+      action_type: "schedule_call",
+      confidence: 0.9,
+      summary_for_user: "Schedule the eng kickoff call Friday morning",
+      evidence_quote: "let's get eng kickoff scheduled Friday morning",
+    },
+    {
+      action_type: "follow_up_with",
+      confidence: 0.85,
+      summary_for_user: "Follow up with design team about the updated mocks",
+      evidence_quote: "ping design team about updated mocks",
+    },
+    {
+      action_type: "create_report",
+      confidence: 0.88,
+      summary_for_user: "Pull revenue numbers for the board deck",
+      evidence_quote: "I need the revenue numbers for the board deck",
+    },
+    {
+      action_type: "book_meeting",
+      confidence: 0.91,
+      summary_for_user: "Book the big room for all-hands Wednesday 2 PM",
+      evidence_quote: "grab the big room for all-hands Wednesday at 2",
+    },
+  ];
+
+  const stored: ExistingIntent[] = [];
+  for (const cycle of [cycle1, cycle2, cycle3]) {
+    const filtered = filterValidIntents(cycle);
+    for (const c of filtered) {
+      if (!isDuplicateOfExisting(c, stored)) {
+        stored.push({
+          action_type: c.action_type,
+          summary_for_user: c.summary_for_user,
+          evidence_quote: c.evidence_quote,
+        });
+      }
+    }
+  }
+  assert.equal(stored.length, 5);
+  // All 5 expected types are present
+  const types = stored.map((s) => s.action_type).sort();
+  assert.deepEqual(types, [
+    "book_meeting",
+    "create_report",
+    "follow_up_with",
+    "schedule_call",
+    "send_proposal",
+  ]);
+});
+
+test("scenario: noisy 'um uh yeah so um' transcript with one buried task → 1 intent", () => {
+  // The LLM tends to be confidence-poor on transcripts with heavy speech
+  // disfluency. Filter must keep the one real intent and discard the
+  // fillers / clarifications.
+  const llmEmits: RawIntent[] = [
+    {
+      action_type: "reminder_add",
+      confidence: 0.82,
+      summary_for_user: "Pick up the prescription at the pharmacy after work",
+      evidence_quote: "I gotta pick up that prescription after work",
+    },
+    {
+      action_type: "acknowledge",
+      confidence: 0.96,
+      summary_for_user: "Acknowledge speaker's filler words",
+      evidence_quote: "um uh yeah so um",
+    },
+    {
+      action_type: "clarify_status",
+      confidence: 0.7,
+      summary_for_user: "Clarify what the speaker meant",
+      evidence_quote: "so like, what was I saying",
+    },
+  ];
+  const filtered = filterValidIntents(llmEmits);
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].action_type, "reminder_add");
+});
+
+test("scenario: pure gossip — even high-confidence chit-chat gets dropped", () => {
+  // Gossip-only transcript: the LLM may emit high-confidence "intents" that
+  // are conversational. Every one should be filtered.
+  const llmEmits: RawIntent[] = [
+    {
+      action_type: "small_talk",
+      confidence: 0.97,
+      summary_for_user: "Continue gossiping about the new neighbour",
+      evidence_quote: "did you see who moved in next door",
+    },
+    {
+      action_type: "answer_question",
+      confidence: 0.95,
+      summary_for_user: "Tell friend whether you saw the neighbour",
+      evidence_quote: "no I haven't seen them yet",
+    },
+    {
+      action_type: "respond_to_message",
+      confidence: 0.9,
+      summary_for_user: "Respond about the new neighbour",
+      evidence_quote: "they seem nice though",
+    },
+    {
+      action_type: "acknowledge",
+      confidence: 0.88,
+      summary_for_user: "Acknowledge the topic switch",
+      evidence_quote: "anyway",
+    },
+  ];
+  const filtered = filterValidIntents(llmEmits);
+  assert.equal(filtered.length, 0);
+});
+
+test("scenario: dedup catches near-duplicates with different word order", () => {
+  // Same task, different word order, slightly different vocab — Jaccard
+  // should treat as duplicate.
+  const stored: ExistingIntent[] = [
+    {
+      action_type: "send_email",
+      summary_for_user: "Email Sarah about the contract revisions",
+      evidence_quote: "I need to email Sarah about the new contract terms",
+    },
+  ];
+  const candidate: IntentCandidate = {
+    action_type: "send_email",
+    summary_for_user: "Email Sarah regarding contract revisions",
+    evidence_quote: "got to email Sarah about the contract terms",
+  };
+  assert.equal(isDuplicateOfExisting(candidate, stored), true);
 });

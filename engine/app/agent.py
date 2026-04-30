@@ -138,6 +138,43 @@ def _get_domain(url: str) -> str:
         return ""
 
 
+# URL path fragments that almost always indicate a login/auth wall.
+_LOGIN_URL_PATTERNS = (
+    "/login", "/signin", "/sign-in", "/sign_in", "/log-in", "/log_in",
+    "/auth/", "/account/login", "/users/sign_in", "/accounts/login",
+    "/oauth", "/sso", "/checkpoint", "/identifier", "/identifiersignin",
+    "/authenticate",
+)
+
+# Phrases that strongly suggest a login wall when seen in visible page text.
+_LOGIN_PAGE_PHRASES = (
+    "sign in to continue",
+    "log in to continue",
+    "please sign in",
+    "please log in",
+    "create an account or sign in",
+    "you must be logged in",
+    "you need to be signed in",
+    "enter your password",
+    "forgot password",
+)
+
+
+def _looks_like_login(url: str, page_text: str) -> bool:
+    """Heuristic: does this look like a login/auth wall?"""
+    if not url and not page_text:
+        return False
+    url_l = (url or "").lower()
+    for pat in _LOGIN_URL_PATTERNS:
+        if pat in url_l:
+            return True
+    text_l = (page_text or "").lower()
+    for phrase in _LOGIN_PAGE_PHRASES:
+        if phrase in text_l:
+            return True
+    return False
+
+
 async def _load_cookies(user_id: str, domain: str) -> list[dict] | None:
     """Load saved cookies from Supabase, decrypt."""
     try:
@@ -232,6 +269,7 @@ class EngineAgent:
         self._step_count: int = 0
         self._start_time: float = 0.0
         self._stopped: bool = False
+        self._login_notified: bool = False
 
     async def _on_step(self, browser_state, agent_output, step_num) -> None:
         """Callback fired after each Browser Use step. Streams status to user."""
@@ -243,6 +281,30 @@ class EngineAgent:
         if elapsed > MAX_SECONDS:
             self._stopped = True
             return
+
+        # --- Login wall detection (one-shot per task) ---
+        if not self._login_notified:
+            current_url = ""
+            page_text = ""
+            try:
+                current_url = getattr(browser_state, "url", "") or ""
+            except Exception:
+                pass
+            try:
+                # Browser Use exposes page snapshot under different attrs across versions —
+                # try common ones, fall through quietly if not present
+                snap = getattr(browser_state, "elements_text", "") or ""
+                if not snap:
+                    snap = getattr(browser_state, "page_text", "") or ""
+                page_text = (snap or "")[:1500].lower()
+            except Exception:
+                pass
+
+            if _looks_like_login(current_url, page_text):
+                self._login_notified = True
+                await _send_login(self.send)
+                # Don't stop — the agent may still be able to complete via guest checkout,
+                # or the user may sign in inside the browser window and we keep going.
 
         # Throttle status updates to every 2 seconds
         if now - self._last_status_time < 2.0:
@@ -422,9 +484,18 @@ class EngineAgent:
 
         except asyncio.CancelledError:
             await _send_error(self.send, msg.TASK_INTERRUPTED)
-        except Exception as exc:
+        except Exception:
             logger.exception("Agent execution error")
-            await _send_error(self.send, msg.CONNECTION_ERROR)
+            # If we hit a login wall *and* errored, surface that instead of the
+            # generic connection error — it's far more actionable for the user.
+            if self._login_notified:
+                await _send_error(
+                    self.send,
+                    "I couldn't get past the sign-in screen. Try signing in to "
+                    "the site in your browser first, then ask me again.",
+                )
+            else:
+                await _send_error(self.send, msg.CONNECTION_ERROR)
         finally:
             await self._close()
 
