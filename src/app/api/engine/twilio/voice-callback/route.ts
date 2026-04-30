@@ -1,5 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { executeAction } from "@/lib/execute-action";
+import {
+  verifyTwilioRequest,
+  reconstructWebhookUrl,
+  formDataToParams,
+} from "@/lib/twilio-verify";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +21,13 @@ export async function POST(req: Request) {
   }
 
   const formData = await req.formData();
-  const digits = formData.get("Digits")?.toString();
-  const speechResult = formData
-    .get("SpeechResult")
-    ?.toString()
-    ?.toLowerCase();
+  const params = formDataToParams(formData);
+  const signature = req.headers.get("x-twilio-signature");
+  if (!verifyTwilioRequest(signature, reconstructWebhookUrl(req), params)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  const digits = params.Digits;
+  const speechResult = params.SpeechResult?.toLowerCase();
 
   const isConfirm =
     digits === "1" ||

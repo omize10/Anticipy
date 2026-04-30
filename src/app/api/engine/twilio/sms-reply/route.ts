@@ -1,5 +1,10 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { executeAction } from "@/lib/execute-action";
+import {
+  verifyTwilioRequest,
+  reconstructWebhookUrl,
+  formDataToParams,
+} from "@/lib/twilio-verify";
 
 export const dynamic = "force-dynamic";
 
@@ -9,9 +14,14 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   const formData = await req.formData();
-  const body =
-    formData.get("Body")?.toString()?.trim().toLowerCase() || "";
-  const from = formData.get("From")?.toString() || "";
+  const params = formDataToParams(formData);
+  const signature = req.headers.get("x-twilio-signature");
+  if (!verifyTwilioRequest(signature, reconstructWebhookUrl(req), params)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const body = (params.Body || "").trim().toLowerCase();
+  const from = params.From || "";
 
   if (!body || !from) {
     return twimlResponse("Anticipy: Sorry, I didn't understand that.");
