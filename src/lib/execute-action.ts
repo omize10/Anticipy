@@ -281,12 +281,37 @@ async function routeToBrowserAgent(
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Looks up the email of the user that owns the session this intent belongs to.
+ * Calendar tokens are keyed by app-user email, so we need this to dispatch
+ * to the right calendar when multiple users have connected their own.
+ * Falls back to the env-configured admin email if the session row has no
+ * user_email (legacy rows from before per-user signup).
+ */
+async function resolveSessionUserEmail(
+  intent: Record<string, unknown>
+): Promise<string> {
+  const fallback = process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
+  const sessionId = intent.session_id as string | undefined;
+  if (!sessionId) return fallback;
+  try {
+    const { data } = await supabaseAdmin
+      .from("anticipy_sessions")
+      .select("user_email")
+      .eq("id", sessionId)
+      .maybeSingle();
+    return (data?.user_email as string | null) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function executeAction(
   intent: Record<string, unknown>
 ): Promise<ActionResult> {
   const actionType = intent.action_type as string;
   const params = (intent.parameters as Record<string, unknown>) || {};
-  const userEmail = process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
+  const userEmail = await resolveSessionUserEmail(intent);
 
   try {
     switch (actionType) {

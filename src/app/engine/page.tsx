@@ -88,7 +88,25 @@ export default function EnginePage() {
   const [accessCodeLoading, setAccessCodeLoading] = useState(false);
   const [accessCodeError, setAccessCodeError] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
-  const [setupDismissed, setSetupDismissed] = useState(false);
+  // Persist setup-card dismissal across reloads so returning users don't see
+  // the same onboarding card every time.
+  const [setupDismissed, setSetupDismissedState] = useState(false);
+  const setSetupDismissed = useCallback((v: boolean) => {
+    setSetupDismissedState(v);
+    try {
+      if (typeof window !== "undefined") {
+        if (v) localStorage.setItem("anticipy_setup_dismissed", "1");
+        else localStorage.removeItem("anticipy_setup_dismissed");
+      }
+    } catch { /* localStorage may be blocked (private mode) */ }
+  }, []);
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && localStorage.getItem("anticipy_setup_dismissed") === "1") {
+        setSetupDismissedState(true);
+      }
+    } catch { /* localStorage may be blocked */ }
+  }, []);
 
   // ── Engine state ────────────────────────────────────────────────────────────
   const [state, setState] = useState<EngineState>("idle");
@@ -113,6 +131,9 @@ export default function EnginePage() {
   const liveSegmentsRef = useRef<TranscriptSegment[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  // Tracks whether Deepgram disconnected mid-recording. If true on stop,
+  // we fall back to batch transcription so no audio is silently lost.
+  const dgDroppedRef = useRef(false);
 
   // ── Auth effects ────────────────────────────────────────────────────────────
 
@@ -162,13 +183,16 @@ export default function EnginePage() {
     fetchAccessCode();
   }, [session, fetchAccessCode]);
 
-  // Check calendar status
+  // Check calendar status — pass the auth token so the server can scope the
+  // lookup to *this* user (tokens are keyed by email).
   useEffect(() => {
     if (!session) return;
-    fetch("/api/auth/google/status")
+    fetch("/api/auth/google/status", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
       .then((r) => r.json())
-      .then((d) => setCalendarConnected(d.connected))
-      .catch(() => {});
+      .then((d) => setCalendarConnected(!!d.connected))
+      .catch(() => setCalendarConnected(false));
   }, [session]);
 
   // Cleanup on unmount
@@ -303,6 +327,7 @@ export default function EnginePage() {
       setDuration(0);
       setLiveText("");
       liveSegmentsRef.current = [];
+      dgDroppedRef.current = false;
 
       const { data: { session: authSession } } = await supabase.auth.getSession();
       if (!authSession) throw new Error("Sign in required");
@@ -426,18 +451,24 @@ export default function EnginePage() {
 
       dgWs.onerror = (e) => {
         console.error("Deepgram WebSocket error:", e);
+        dgDroppedRef.current = true;
+        // Soft warning — recording continues (audio chunks are still buffered
+        // and we'll batch-transcribe them on stop). Do not flip state.
         setError(
-          "Live transcription dropped. Stop and start again to reconnect — your audio is still being captured."
+          "Live transcription dropped. We're still recording — finish and we'll process the audio."
         );
       };
 
       dgWs.onclose = (e) => {
         // Code 1000 = normal close (we initiated it on stopRecording).
-        // Anything else mid-recording is unexpected.
+        // Anything else mid-recording is unexpected — but the MediaRecorder
+        // is still capturing, so we keep going and will fall back to
+        // batch transcription when the user hits stop.
         if (e.code !== 1000 && mediaRecorderRef.current?.state === "recording") {
           console.warn("Deepgram WebSocket closed unexpectedly:", e.code, e.reason);
+          dgDroppedRef.current = true;
           setError(
-            "Live transcription dropped. Stop and start again to reconnect."
+            "Live transcription dropped. We're still recording — finish and we'll process the audio."
           );
         }
       };
@@ -586,11 +617,16 @@ export default function EnginePage() {
     analyserRef.current = null;
 
     const finalSegments = liveSegmentsRef.current;
+    // If Deepgram dropped mid-recording, prefer batch transcription so the
+    // post-drop audio isn't silently lost. We have the full audio in chunksRef.
+    const useBatchTranscribe =
+      finalSegments.length === 0 ||
+      (dgDroppedRef.current && chunksRef.current.length > 0);
 
     const { data: { session: authSession } } = await supabase.auth.getSession();
     const authToken = authSession?.access_token;
 
-    if (finalSegments.length === 0) {
+    if (useBatchTranscribe) {
       setState("transcribing");
       try {
         if (!authToken) throw new Error("Sign in required");
@@ -1137,12 +1173,13 @@ export default function EnginePage() {
             )}
             {!calendarConnected && (
               <a
-                href="/api/auth/google"
+                href={`/api/auth/google?token=${encodeURIComponent(session.access_token)}`}
                 className="text-[12px] px-3 py-1.5 rounded-pill transition-all"
                 style={{
                   background: "rgba(200,169,126,0.1)",
                   color: "var(--gold)",
                   border: "1px solid rgba(200,169,126,0.2)",
+                  textDecoration: "none",
                 }}
               >
                 Connect Calendar
