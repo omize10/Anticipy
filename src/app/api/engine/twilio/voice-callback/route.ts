@@ -49,23 +49,20 @@ export async function POST(req: Request) {
 
   const newStatus = isConfirm ? "confirmed" : "rejected";
 
-  // Guard: only update intents that are still pending to prevent double-execution
-  // (user could confirm via voice AND email link, or voice AND SMS reply).
-  const { data: currentIntent } = await supabaseAdmin
-    .from("anticipy_intents")
-    .select("status")
-    .eq("id", intentId)
-    .single();
-
-  if (!currentIntent || currentIntent.status !== "pending") {
-    return twimlResponse("That action has already been handled. Goodbye.");
-  }
-
-  await supabaseAdmin
+  // Atomic claim: a single conditional UPDATE eliminates the SELECT→UPDATE
+  // race that lets a duplicate webhook (voice + email + SMS hitting at once)
+  // execute the action twice. We rely on the returned row count, not on a
+  // prior SELECT, because PgBouncer can serve stale reads.
+  const { data: flipped } = await supabaseAdmin
     .from("anticipy_intents")
     .update({ status: newStatus })
     .eq("id", intentId)
-    .eq("status", "pending"); // Double-guard against TOCTOU race
+    .eq("status", "pending")
+    .select("id");
+
+  if (!flipped || flipped.length === 0) {
+    return twimlResponse("That action has already been handled. Goodbye.");
+  }
 
   if (isConfirm) {
     const { data: intent } = await supabaseAdmin

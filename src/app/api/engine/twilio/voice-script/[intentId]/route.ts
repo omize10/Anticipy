@@ -1,5 +1,9 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { readVerifiedTwilioBody } from "@/lib/twilio-verify";
+import {
+  verifyTwilioRequest,
+  reconstructWebhookUrl,
+  formDataToParams,
+} from "@/lib/twilio-verify";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +19,10 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ intentId: string }> }
 ) {
-  const verified = await readVerifiedTwilioBody(req);
-  if (!verified) {
+  const formData = await req.formData();
+  const twilioParams = formDataToParams(formData);
+  const signature = req.headers.get("x-twilio-signature");
+  if (!verifyTwilioRequest(signature, reconstructWebhookUrl(req), twilioParams)) {
     return new Response("Forbidden", { status: 403 });
   }
 

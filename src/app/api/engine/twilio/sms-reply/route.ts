@@ -77,11 +77,21 @@ export async function POST(req: Request) {
 
   const newStatus = isConfirm ? "confirmed" : "rejected";
 
-  await supabaseAdmin
+  // Atomic claim: only update if still pending, and check the row count.
+  // Without the count check, two near-simultaneous webhooks (e.g. SMS reply
+  // and email-link click) could both pass the SELECT above, only one wins
+  // the UPDATE, but the loser still falls through to executeAction below
+  // and runs the action a second time.
+  const { data: flipped } = await supabaseAdmin
     .from("anticipy_intents")
     .update({ status: newStatus })
     .eq("id", intentId)
-    .eq("status", "pending"); // Double-guard against TOCTOU race
+    .eq("status", "pending")
+    .select("id");
+
+  if (!flipped || flipped.length === 0) {
+    return twimlResponse("Anticipy: That action has already been handled.");
+  }
 
   // Record the reply
   await supabaseAdmin
