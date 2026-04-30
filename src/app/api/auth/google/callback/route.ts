@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
       email = userInfo.email || process.env.TEST_USER_EMAIL || "omar@anticipy.ai";
     }
 
-    await storeTokens(email, {
+    await storeTokens(email || "omar@anticipy.ai", {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: Date.now() + (tokens.expires_in ?? 3600) * 1000,
