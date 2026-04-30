@@ -37,8 +37,9 @@ export async function GET(request: NextRequest) {
   }
 
   const admin = getAdminClient();
-  const page = parseInt(request.nextUrl.searchParams.get("page") || "1");
-  const search = request.nextUrl.searchParams.get("search") || "";
+  const rawPage = parseInt(request.nextUrl.searchParams.get("page") || "1", 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.min(rawPage, 10_000) : 1;
+  const search = (request.nextUrl.searchParams.get("search") || "").slice(0, 200);
   const limit = 50;
   const offset = (page - 1) * limit;
 
@@ -49,7 +50,9 @@ export async function GET(request: NextRequest) {
     .range(offset, offset + limit - 1);
 
   if (search) {
-    query = query.ilike("email", `%${search}%`);
+    // Escape Postgres ILIKE wildcards so a search like "%" doesn't match every row.
+    const escaped = search.replace(/[\\%_]/g, "\\$&");
+    query = query.ilike("email", `%${escaped}%`);
   }
 
   const { data, count, error } = await query;
@@ -66,7 +69,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id } = await request.json();
+  const body = await request.json().catch(() => null);
+  const id = body && typeof body === "object" ? body.id : null;
+  if (typeof id !== "string" || !id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
   const admin = getAdminClient();
 
   const { error } = await admin
